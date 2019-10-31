@@ -28,7 +28,7 @@
         <protobuf.version>2.5.0</protobuf.version>
         <dep.guava.version>18.0</dep.guava.version>
         <checkstyle.failOnViolation>true</checkstyle.failOnViolation>
-        <arrow.cpp.build.dir>../../../cpp/release-build</arrow.cpp.build.dir>
+        <arrow.cpp.build.dir>../../cpp/release-build/release</arrow.cpp.build.dir>
     </properties>
     <dependencies>
         <dependency>
