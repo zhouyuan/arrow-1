@@ -21,6 +21,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.BufferManager;
+import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 
@@ -30,6 +33,13 @@ import io.netty.buffer.ArrowBuf;
  * ArrowRecordBatchBuilderImpl used to wrap native returned data into an ArrowRecordBatch.
  */
 public class ArrowRecordBatchBuilderImpl {
+
+  private static final BufferAllocator EMPTY_ALLOCATOR = new RootAllocator() {
+    @Override
+    public ArrowBuf buffer(int initialRequestSize, BufferManager manager) {
+      throw new UnsupportedOperationException();
+    }
+  };
 
   private int length;
   private ArrowRecordBatchBuilder recordBatchBuilder;
@@ -58,11 +68,15 @@ public class ArrowRecordBatchBuilderImpl {
 
     List<ArrowBuf> buffers = new ArrayList<ArrowBuf>();
     for (ArrowBufBuilder tmp : recordBatchBuilder.bufferBuilders) {
-      AdaptorReferenceManager referenceManager =
-          new AdaptorReferenceManager(tmp.nativeInstanceId, tmp.size);
-      buffers.add(new ArrowBuf(referenceManager, null, tmp.size, tmp.memoryAddress, false));
+      if (tmp == null) {
+        // for most primitive types, null indicates an empty validity buffer
+        buffers.add(EMPTY_ALLOCATOR.getEmpty());
+      } else {
+        AdaptorReferenceManager referenceManager =
+            new AdaptorReferenceManager(tmp.nativeInstanceId, tmp.size);
+        buffers.add(new ArrowBuf(referenceManager, null, tmp.size, tmp.memoryAddress, false));
+      }
     }
     return new ArrowRecordBatch(recordBatchBuilder.length, nodes, buffers);
   }
-  
 } 

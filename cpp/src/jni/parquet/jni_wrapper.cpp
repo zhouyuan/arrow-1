@@ -232,10 +232,14 @@ Java_org_apache_arrow_adapter_parquet_ParquetReaderJniWrapper_nativeReadNext(
 
   for (size_t j = 0; j < buffers.size(); ++j) {
     auto buffer = buffers[j];
-    jobject arrowBufBuilder =
-        env->NewObject(arrowbuf_builder_class, arrowbuf_builder_constructor,
-                       buffer_holder_.Insert(buffer), buffer->data(), (int)buffer->size(),
-                       buffer->capacity());
+    jobject arrowBufBuilder;
+    if (buffer == nullptr) {
+      arrowBufBuilder = nullptr;
+    } else {
+      arrowBufBuilder = env->NewObject(arrowbuf_builder_class, arrowbuf_builder_constructor,
+                     buffer_holder_.Insert(buffer), buffer->data(), (int) buffer->size(),
+                     buffer->capacity());
+    }
     env->SetObjectArrayElement(arrowbuf_builder_array, j, arrowBufBuilder);
   }
 

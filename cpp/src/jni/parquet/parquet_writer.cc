@@ -29,8 +29,10 @@ namespace parquet {
 ParquetWriter::ParquetWriter(std::string path,
                              const std::shared_ptr<::arrow::Schema>& schema)
     : pool_(::arrow::default_memory_pool()), schema(schema) {
-  if (path.find("hdfs") != std::string::npos) {
+  if (path.find("hdfs:") != std::string::npos) {
     connector_ = new HdfsConnector(path);
+  } else if (path.find("file:") != std::string::npos) {
+    connector_ = new FileConnector(path.substr(5));
   } else {
     connector_ = new FileConnector(path);
   }
