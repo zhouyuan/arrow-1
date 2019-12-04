@@ -137,20 +137,7 @@ class ValueCountsAction final : ActionBase {
   }
 
   template <class Index>
-  Status CheckOrAppend(Index index) {
-    Status s = Status::OK();
-    Index to_append_size = index - count_builder_.length() + 1;
-    if (to_append_size > 0) {
-      for (Index i = 0; i < to_append_size; i++) {
-        s = count_builder_.Append(0);
-      }
-    }
-    return s;
-  }
-
-  template <class Index>
   void ObserveNullFound(Index index) {
-    auto s = CheckOrAppend(index);
     count_builder_[index]++;
   }
 
@@ -161,7 +148,7 @@ class ValueCountsAction final : ActionBase {
 
   template <class Index>
   void ObserveNullNotFound(Index index, Status* status) {
-    auto s = CheckOrAppend(index);
+    Status s = count_builder_.Append(1);
     if (ARROW_PREDICT_FALSE(!s.ok())) {
       *status = s;
     }
@@ -169,14 +156,12 @@ class ValueCountsAction final : ActionBase {
 
   template <class Index>
   void ObserveFound(Index slot) {
-    auto s = CheckOrAppend(slot);
     count_builder_[slot]++;
   }
 
   template <class Index>
   void ObserveNotFound(Index slot, Status* status) {
-    auto s = CheckOrAppend(slot);
-    count_builder_[slot]++;
+    Status s = count_builder_.Append(1);
     if (ARROW_PREDICT_FALSE(!s.ok())) {
       *status = s;
     }
@@ -237,9 +222,11 @@ class DictEncodeAction final : public ActionBase {
   Int32Builder indices_builder_;
 };
 
-// ----------------------------------------------------------------------
-// Base class for all hash kernel implementations
-
+/// \brief Invoke hash table kernel on input array, returning any output
+/// values. Implementations should be thread-safe
+///
+/// This interface is implemented below using visitor pattern on "Action"
+/// implementations.  It is not consolidate to keep the contract clearer.
 class HashKernel : public UnaryKernel {
  public:
   // Reset for another run.
@@ -255,6 +242,9 @@ class HashKernel : public UnaryKernel {
   // Get the values (keys) acummulated in the dictionary so far.
   virtual Status GetDictionary(std::shared_ptr<ArrayData>* out) = 0;
 };
+
+// ----------------------------------------------------------------------
+// Base class for all hash kernel implementations
 
 class HashKernelImpl : public HashKernel {
  public:
@@ -283,17 +273,16 @@ template <bool B, typename T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename Type, typename Scalar, typename Action, bool with_error_status = false,
-          bool with_memo_visit_null = true,
-          typename MemoTableType = std::shared_ptr<internal::MemoTable>>
+          bool with_memo_visit_null = true>
 class RegularHashKernelImpl : public HashKernelImpl {
  public:
-  RegularHashKernelImpl(const std::shared_ptr<DataType>& type, MemoryPool* pool,
-                        std::shared_ptr<MemoTableType> memo_table)
-      : pool_(pool), type_(type), action_(type, pool) {
-    memo_table_ = memo_table;
-  }
+  RegularHashKernelImpl(const std::shared_ptr<DataType>& type, MemoryPool* pool)
+      : pool_(pool), type_(type), action_(type, pool) {}
 
-  Status Reset() override { return action_.Reset(); }
+  Status Reset() override {
+    memo_table_.reset(new MemoTable(pool_, 0));
+    return action_.Reset();
+  }
 
   Status Append(const ArrayData& arr) override {
     RETURN_NOT_OK(action_.Reserve(arr.length));
@@ -305,8 +294,8 @@ class RegularHashKernelImpl : public HashKernelImpl {
   Status FlushFinal(Datum* out) override { return action_.FlushFinal(out); }
 
   Status GetDictionary(std::shared_ptr<ArrayData>* out) override {
-    return DictionaryTraits<Type>::GetDictionaryArrayData(
-        pool_, type_, *memo_table_.get(), 0 /* start_offset */, out);
+    return DictionaryTraits<Type>::GetDictionaryArrayData(pool_, type_, *memo_table_,
+                                                          0 /* start_offset */, out);
   }
 
   template <typename Enable = Status>
@@ -368,20 +357,21 @@ class RegularHashKernelImpl : public HashKernelImpl {
   std::shared_ptr<DataType> out_type() const override { return action_.out_type(); }
 
  protected:
+  using MemoTable = typename HashTraits<Type>::MemoTableType;
+
   MemoryPool* pool_;
   std::shared_ptr<DataType> type_;
   Action action_;
-  std::shared_ptr<MemoTableType> memo_table_;
+  std::unique_ptr<MemoTable> memo_table_;
 };
 
 // ----------------------------------------------------------------------
 // Hash kernel implementation for nulls
 
-template <typename Action, typename MemoTableType>
+template <typename Action>
 class NullHashKernelImpl : public HashKernelImpl {
  public:
-  NullHashKernelImpl(const std::shared_ptr<DataType>& type, MemoryPool* pool,
-                     std::shared_ptr<MemoTableType> memo_table)
+  NullHashKernelImpl(const std::shared_ptr<DataType>& type, MemoryPool* pool)
       : pool_(pool), type_(type), action_(type, pool) {}
 
   Status Reset() override { return action_.Reset(); }
@@ -420,63 +410,90 @@ class NullHashKernelImpl : public HashKernelImpl {
 // Kernel wrapper for generic hash table kernels
 
 template <typename Type, typename Action, bool with_error_status,
-          bool with_memo_visit_null, typename MemoTableType, typename Enable = void>
+          bool with_memo_visit_null, typename Enable = void>
 struct HashKernelTraits {};
 
 template <typename Type, typename Action, bool with_error_status,
-          bool with_memo_visit_null, typename MemoTableType>
+          bool with_memo_visit_null>
 struct HashKernelTraits<Type, Action, with_error_status, with_memo_visit_null,
-                        MemoTableType, enable_if_null<Type>> {
-  using HashKernelImpl = NullHashKernelImpl<Action, MemoTableType>;
+                        enable_if_null<Type>> {
+  using HashKernelImpl = NullHashKernelImpl<Action>;
 };
 
 template <typename Type, typename Action, bool with_error_status,
-          bool with_memo_visit_null, typename MemoTableType>
+          bool with_memo_visit_null>
 struct HashKernelTraits<Type, Action, with_error_status, with_memo_visit_null,
-                        MemoTableType, enable_if_has_c_type<Type>> {
+                        enable_if_has_c_type<Type>> {
+  using HashKernelImpl = RegularHashKernelImpl<Type, typename Type::c_type, Action,
+                                               with_error_status, with_memo_visit_null>;
+};
+
+template <typename Type, typename Action, bool with_error_status,
+          bool with_memo_visit_null>
+struct HashKernelTraits<Type, Action, with_error_status, with_memo_visit_null,
+                        enable_if_boolean<Type>> {
   using HashKernelImpl =
-      RegularHashKernelImpl<Type, typename Type::c_type, Action, with_error_status,
-                            with_memo_visit_null, MemoTableType>;
+      RegularHashKernelImpl<Type, bool, Action, with_error_status, with_memo_visit_null>;
 };
 
 template <typename Type, typename Action, bool with_error_status,
-          bool with_memo_visit_null, typename MemoTableType>
+          bool with_memo_visit_null>
 struct HashKernelTraits<Type, Action, with_error_status, with_memo_visit_null,
-                        MemoTableType, enable_if_boolean<Type>> {
-  using HashKernelImpl = RegularHashKernelImpl<Type, bool, Action, with_error_status,
-                                               with_memo_visit_null, MemoTableType>;
+                        enable_if_binary<Type>> {
+  using HashKernelImpl = RegularHashKernelImpl<Type, util::string_view, Action,
+                                               with_error_status, with_memo_visit_null>;
 };
 
 template <typename Type, typename Action, bool with_error_status,
-          bool with_memo_visit_null, typename MemoTableType>
+          bool with_memo_visit_null>
 struct HashKernelTraits<Type, Action, with_error_status, with_memo_visit_null,
-                        MemoTableType, enable_if_binary<Type>> {
-  using HashKernelImpl =
-      RegularHashKernelImpl<Type, util::string_view, Action, with_error_status,
-                            with_memo_visit_null, MemoTableType>;
-};
-
-template <typename Type, typename Action, bool with_error_status,
-          bool with_memo_visit_null, typename MemoTableType>
-struct HashKernelTraits<Type, Action, with_error_status, with_memo_visit_null,
-                        MemoTableType, enable_if_fixed_size_binary<Type>> {
-  using HashKernelImpl =
-      RegularHashKernelImpl<Type, util::string_view, Action, with_error_status,
-                            with_memo_visit_null, MemoTableType>;
+                        enable_if_fixed_size_binary<Type>> {
+  using HashKernelImpl = RegularHashKernelImpl<Type, util::string_view, Action,
+                                               with_error_status, with_memo_visit_null>;
 };
 
 }  // namespace
 
-template <typename InType, typename MemoTableType>
+#define PROCESS_SUPPORTED_HASH_TYPES(PROCESS) \
+  PROCESS(NullType)                           \
+  PROCESS(BooleanType)                        \
+  PROCESS(UInt8Type)                          \
+  PROCESS(Int8Type)                           \
+  PROCESS(UInt16Type)                         \
+  PROCESS(Int16Type)                          \
+  PROCESS(UInt32Type)                         \
+  PROCESS(Int32Type)                          \
+  PROCESS(UInt64Type)                         \
+  PROCESS(Int64Type)                          \
+  PROCESS(FloatType)                          \
+  PROCESS(DoubleType)                         \
+  PROCESS(Date32Type)                         \
+  PROCESS(Date64Type)                         \
+  PROCESS(Time32Type)                         \
+  PROCESS(Time64Type)                         \
+  PROCESS(TimestampType)                      \
+  PROCESS(BinaryType)                         \
+  PROCESS(StringType)                         \
+  PROCESS(FixedSizeBinaryType)                \
+  PROCESS(Decimal128Type)
+
 Status GetUniqueKernel(FunctionContext* ctx, const std::shared_ptr<DataType>& type,
-                       std::shared_ptr<MemoTableType> memo_table,
                        std::unique_ptr<HashKernel>* out) {
   std::unique_ptr<HashKernel> kernel;
-  kernel.reset(
-      new
-      typename HashKernelTraits<InType, UniqueAction, false, true,
-                                MemoTableType>::HashKernelImpl(type, ctx->memory_pool(),
-                                                               memo_table));
+  switch (type->id()) {
+#define PROCESS(InType)                                                               \
+  case InType::type_id:                                                               \
+    kernel.reset(                                                                     \
+        new                                                                           \
+        typename HashKernelTraits<InType, UniqueAction, false, true>::HashKernelImpl( \
+            type, ctx->memory_pool()));                                               \
+    break;
+
+    PROCESS_SUPPORTED_HASH_TYPES(PROCESS)
+#undef PROCESS
+    default:
+      break;
+  }
 
   CHECK_IMPLEMENTED(kernel, "unique", type);
   RETURN_NOT_OK(kernel->Reset());
@@ -484,17 +501,26 @@ Status GetUniqueKernel(FunctionContext* ctx, const std::shared_ptr<DataType>& ty
   return Status::OK();
 }
 
-template <typename InType, typename MemoTableType>
 Status GetDictionaryEncodeKernel(FunctionContext* ctx,
                                  const std::shared_ptr<DataType>& type,
-                                 std::shared_ptr<MemoTableType> memo_table,
                                  std::unique_ptr<HashKernel>* out) {
   std::unique_ptr<HashKernel> kernel;
-  kernel.reset(
-      new
-      typename HashKernelTraits<InType, DictEncodeAction, false, false,
-                                MemoTableType>::HashKernelImpl(type, ctx->memory_pool(),
-                                                               memo_table));
+
+  switch (type->id()) {
+#define PROCESS(InType)                                                                  \
+  case InType::type_id:                                                                  \
+    kernel.reset(                                                                        \
+        new typename HashKernelTraits<InType, DictEncodeAction, false,                   \
+                                      false>::HashKernelImpl(type, ctx->memory_pool())); \
+    break;
+
+    PROCESS_SUPPORTED_HASH_TYPES(PROCESS)
+#undef PROCESS
+    default:
+      break;
+  }
+
+#undef DICTIONARY_ENCODE_CASE
 
   CHECK_IMPLEMENTED(kernel, "dictionary-encode", type);
   RETURN_NOT_OK(kernel->Reset());
@@ -502,16 +528,23 @@ Status GetDictionaryEncodeKernel(FunctionContext* ctx,
   return Status::OK();
 }
 
-template <typename InType, typename MemoTableType>
 Status GetValueCountsKernel(FunctionContext* ctx, const std::shared_ptr<DataType>& type,
-                            std::shared_ptr<MemoTableType> memo_table,
                             std::unique_ptr<HashKernel>* out) {
   std::unique_ptr<HashKernel> kernel;
-  kernel.reset(
-      new
-      typename HashKernelTraits<InType, ValueCountsAction, true, true,
-                                MemoTableType>::HashKernelImpl(type, ctx->memory_pool(),
-                                                               memo_table));
+
+  switch (type->id()) {
+#define PROCESS(InType)                                                                 \
+  case InType::type_id:                                                                 \
+    kernel.reset(                                                                       \
+        new typename HashKernelTraits<InType, ValueCountsAction, true,                  \
+                                      true>::HashKernelImpl(type, ctx->memory_pool())); \
+    break;
+
+    PROCESS_SUPPORTED_HASH_TYPES(PROCESS)
+#undef PROCESS
+    default:
+      break;
+  }
 
   CHECK_IMPLEMENTED(kernel, "count-values", type);
   RETURN_NOT_OK(kernel->Reset());
@@ -534,21 +567,17 @@ Status InvokeHash(FunctionContext* ctx, HashKernel* func, const Datum& value,
 
 }  // namespace
 
-template <typename InType, typename MemoTableType>
-Status Unique(FunctionContext* ctx, const Datum& value,
-              std::shared_ptr<MemoTableType> memo_table, std::shared_ptr<Array>* out) {
+Status Unique(FunctionContext* ctx, const Datum& value, std::shared_ptr<Array>* out) {
   std::unique_ptr<HashKernel> func;
-  RETURN_NOT_OK(GetUniqueKernel<InType>(ctx, value.type(), memo_table, &func));
+  RETURN_NOT_OK(GetUniqueKernel(ctx, value.type(), &func));
 
   std::vector<Datum> dummy_outputs;
   return InvokeHash(ctx, func.get(), value, &dummy_outputs, out);
 }
 
-template <typename InType, typename MemoTableType>
-Status DictionaryEncode(FunctionContext* ctx, const Datum& value,
-                        std::shared_ptr<MemoTableType> memo_table, Datum* out) {
+Status DictionaryEncode(FunctionContext* ctx, const Datum& value, Datum* out) {
   std::unique_ptr<HashKernel> func;
-  RETURN_NOT_OK(GetDictionaryEncodeKernel<InType>(ctx, value.type(), memo_table, &func));
+  RETURN_NOT_OK(GetDictionaryEncodeKernel(ctx, value.type(), &func));
 
   std::shared_ptr<Array> dictionary;
   std::vector<Datum> indices_outputs;
@@ -583,13 +612,10 @@ const char kValuesFieldName[] = "values";
 const char kCountsFieldName[] = "counts";
 const int32_t kValuesFieldIndex = 0;
 const int32_t kCountsFieldIndex = 1;
-
-template <typename InType, typename MemoTableType>
 Status ValueCounts(FunctionContext* ctx, const Datum& value,
-                   std::shared_ptr<MemoTableType> memo_table,
                    std::shared_ptr<Array>* counts) {
   std::unique_ptr<HashKernel> func;
-  RETURN_NOT_OK(GetValueCountsKernel<InType>(ctx, value.type(), memo_table, &func));
+  RETURN_NOT_OK(GetValueCountsKernel(ctx, value.type(), &func));
 
   // Calls return nothing for counts.
   std::vector<Datum> unused_output;
@@ -607,90 +633,6 @@ Status ValueCounts(FunctionContext* ctx, const Datum& value,
       std::vector<std::shared_ptr<Array>>{uniques, MakeArray(value_counts.array())});
   return Status::OK();
 }
-
-#define PROCESS_SUPPORTED_TYPES(PROCESS) \
-  PROCESS(BooleanType)                   \
-  PROCESS(UInt8Type)                     \
-  PROCESS(Int8Type)                      \
-  PROCESS(UInt16Type)                    \
-  PROCESS(Int16Type)                     \
-  PROCESS(UInt32Type)                    \
-  PROCESS(Int32Type)                     \
-  PROCESS(UInt64Type)                    \
-  PROCESS(Int64Type)                     \
-  PROCESS(FloatType)                     \
-  PROCESS(DoubleType)                    \
-  PROCESS(Date32Type)                    \
-  PROCESS(Date64Type)                    \
-  PROCESS(Time32Type)                    \
-  PROCESS(Time64Type)                    \
-  PROCESS(TimestampType)                 \
-  PROCESS(BinaryType)                    \
-  PROCESS(StringType)                    \
-  PROCESS(FixedSizeBinaryType)           \
-  PROCESS(Decimal128Type)
-
-Status Unique(FunctionContext* ctx, const Datum& value, std::shared_ptr<Array>* out) {
-  switch (value.type()->id()) {
-#define PROCESS(InType)                                                                \
-  case InType::type_id: {                                                              \
-    using MemoTableType = typename arrow::internal::HashTraits<InType>::MemoTableType; \
-    auto memo_table = std::make_shared<MemoTableType>(ctx->memory_pool());             \
-    return Unique<InType>(ctx, value, memo_table, out);                                \
-  } break;
-    PROCESS_SUPPORTED_TYPES(PROCESS)
-#undef PROCESS
-    case NullType::type_id: {
-      std::shared_ptr<internal::MemoTable> memo_table;
-      return Unique<NullType>(ctx, value, memo_table, out);
-    } break;
-    default:
-      break;
-  }
-  return arrow::Status::OK();
-}
-
-Status DictionaryEncode(FunctionContext* ctx, const Datum& value, Datum* out) {
-  switch (value.type()->id()) {
-#define PROCESS(InType)                                                                \
-  case InType::type_id: {                                                              \
-    using MemoTableType = typename arrow::internal::HashTraits<InType>::MemoTableType; \
-    auto memo_table = std::make_shared<MemoTableType>(ctx->memory_pool());             \
-    return DictionaryEncode<InType>(ctx, value, memo_table, out);                      \
-  } break;
-    PROCESS_SUPPORTED_TYPES(PROCESS)
-#undef PROCESS
-    case NullType::type_id: {
-      std::shared_ptr<internal::MemoTable> memo_table;
-      return DictionaryEncode<NullType>(ctx, value, memo_table, out);
-    } break;
-    default:
-      break;
-  }
-  return arrow::Status::OK();
-}
-
-Status ValueCounts(FunctionContext* ctx, const Datum& value,
-                   std::shared_ptr<Array>* counts) {
-  switch (value.type()->id()) {
-#define PROCESS(InType)                                                                \
-  case InType::type_id: {                                                              \
-    using MemoTableType = typename arrow::internal::HashTraits<InType>::MemoTableType; \
-    auto memo_table = std::make_shared<MemoTableType>(ctx->memory_pool());             \
-    return ValueCounts<InType>(ctx, value, memo_table, counts);                        \
-  } break;
-    PROCESS_SUPPORTED_TYPES(PROCESS)
-#undef PROCESS
-    case NullType::type_id: {
-      std::shared_ptr<internal::MemoTable> memo_table;
-      return ValueCounts<NullType>(ctx, value, memo_table, counts);
-    } break;
-    default:
-      break;
-  }
-  return arrow::Status::OK();
-}
-
-#undef PROCESS_SUPPORTED_TYPES
+#undef PROCESS_SUPPORTED_HASH_TYPES
 }  // namespace compute
 }  // namespace arrow
