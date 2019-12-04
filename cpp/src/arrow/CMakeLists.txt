@@ -270,6 +270,7 @@ if(ARROW_COMPUTE)
               compute/kernels/cast.cc
               compute/kernels/compare.cc
               compute/kernels/count.cc
+              compute/kernels/groupby_aggregate.cc
               compute/kernels/hash.cc
               compute/kernels/filter.cc
               compute/kernels/mean.cc
