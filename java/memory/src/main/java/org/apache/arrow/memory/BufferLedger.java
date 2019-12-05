@@ -27,7 +27,6 @@ import org.apache.arrow.memory.util.HistoricalLog;
 import org.apache.arrow.util.Preconditions;
 
 import io.netty.buffer.ArrowBuf;
-import io.netty.buffer.UnsafeDirectLittleEndian;
 
 /**
  * The reference manager that binds an {@link AllocationManager} to
@@ -269,7 +268,7 @@ public class BufferLedger implements ValueWithKeyIncluded<BaseAllocator>, Refere
     allocator.assertOpen();
 
     // the start virtual address of the ArrowBuf will be same as address of memory chunk
-    final long startAddress = allocationManager.getMemoryChunk().memoryAddress();
+    final long startAddress = allocationManager.memoryAddress();
 
     // create ArrowBuf
     final ArrowBuf buf = new ArrowBuf(this, manager, length, startAddress, false);
@@ -523,7 +522,7 @@ public class BufferLedger implements ValueWithKeyIncluded<BaseAllocator>, Refere
     }
   }
 
-  public UnsafeDirectLittleEndian getUnderlying() {
-    return allocationManager.getMemoryChunk();
+  public AllocationManager getAllocationManager() {
+    return allocationManager;
   }
 }
