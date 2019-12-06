@@ -17,8 +17,10 @@
 
 #include <arrow/buffer.h>
 #include <arrow/filesystem/filesystem.h>
+#include <arrow/filesystem/path_util.h>
 #include <arrow/ipc/api.h>
 #include <arrow/ipc/dictionary.h>
+#include <arrow/type.h>
 #include <jni.h>
 #include <iostream>
 #include <string>
@@ -94,11 +96,7 @@ Java_org_apache_arrow_adapter_parquet_ParquetReaderJniWrapper_nativeOpenParquetR
   }
 
   std::shared_ptr<arrow::io::RandomAccessFile> file;
-  status = fs->OpenInputFile(file_name).Value(&file);
-  if (!status.ok()) {
-    std::string error_message = "nativeOpenParquetReader: " + status.message();
-    env->ThrowNew(io_exception_class, error_message.c_str());
-  }
+  ARROW_ASSIGN_OR_THROW(file, fs->OpenInputFile(file_name));
 
   parquet::ArrowReaderProperties properties(true);
   properties.set_batch_size(batch_size);
@@ -205,15 +203,8 @@ Java_org_apache_arrow_adapter_parquet_ParquetReaderJniWrapper_nativeReadNext(JNI
   if (record_batch == nullptr) {
     return nullptr;
   }
-  std::shared_ptr<arrow::Schema> schema;
-  status = reader->ReadSchema(&schema);
-  if (!status.ok()) {
-    std::string error_message =
-        "nativeReadNext: failed to read schema, err is " + status.message();
-    env->ThrowNew(io_exception_class, error_message.c_str());
-  }
 
-  return MakeRecordBatchBuilder(env, schema, record_batch);
+  return MakeRecordBatchBuilder(env, record_batch);
 }
 
 JNIEXPORT jobject JNICALL
@@ -224,6 +215,7 @@ Java_org_apache_arrow_adapter_parquet_ParquetReaderJniWrapper_nativeGetSchema(JN
   auto reader = GetFileReader(env, id);
   std::shared_ptr<arrow::Schema> schema;
   status = reader->ReadSchema(&schema);
+
   if (!status.ok()) {
     std::string error_message =
         "nativeGetSchema: failed to read schema, err is " + status.message();
@@ -266,12 +258,23 @@ Java_org_apache_arrow_adapter_parquet_ParquetWriterJniWrapper_nativeOpenParquetW
     env->ThrowNew(io_exception_class, error_message.c_str());
   }
 
-  std::shared_ptr<arrow::io::OutputStream> sink;
-  status = fs->OpenOutputStream(file_name).Value(&sink);
-  if (!status.ok()) {
-    std::string error_message = "nativeOpenParquetWriter: " + status.message();
-    env->ThrowNew(io_exception_class, error_message.c_str());
+  // check if directory exists
+  auto dir = arrow::fs::internal::GetAbstractPathParent(file_name).first;
+  arrow::fs::Selector selector;
+  selector.base_dir = dir;
+  selector.allow_non_existent = true;
+  std::vector<arrow::fs::FileStats> stats;
+  ARROW_ASSIGN_OR_THROW(stats, fs->GetTargetStats(selector));
+  if (stats.size() == 0) {
+    status = fs->CreateDir(dir);
+    if (!status.ok()) {
+      std::string error_message = "nativeOpenParquetWriter: " + status.message();
+      env->ThrowNew(io_exception_class, error_message.c_str());
+    }
   }
+
+  std::shared_ptr<arrow::io::OutputStream> sink;
+  ARROW_ASSIGN_OR_THROW(sink, fs->OpenOutputStream(file_name));
 
   std::unique_ptr<ParquetFileWriter> writer;
   status = ParquetFileWriter::Open(sink, arrow::default_memory_pool(), schema, &writer);

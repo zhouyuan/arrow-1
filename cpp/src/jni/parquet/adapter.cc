@@ -56,6 +56,8 @@ class ParquetFileReader::Impl {
                                const std::vector<int>& row_group_indices) {
     RETURN_NOT_OK(
         GetRecordBatchReader(row_group_indices, column_indices, &record_batch_reader_));
+    RETURN_NOT_OK(record_batch_reader_->ReadNext(&next_batch_));
+    schema_ = next_batch_->schema();
     return Status::OK();
   }
 
@@ -64,16 +66,25 @@ class ParquetFileReader::Impl {
     std::vector<int> row_group_indices =
         GetRowGroupIndices(parquet_reader_->num_row_groups(), start_pos, end_pos);
     RETURN_NOT_OK(InitRecordBatchReader(column_indices, row_group_indices));
+    RETURN_NOT_OK(record_batch_reader_->ReadNext(&next_batch_));
+    schema_ = next_batch_->schema();
     return Status::OK();
   }
 
   Status ReadSchema(std::shared_ptr<Schema>* out) {
-    RETURN_NOT_OK(parquet_reader_->GetSchema(out));
+    if (!schema_) {
+      return arrow::Status::Invalid("ReadSchema found non-exist schema.");
+    }
+    *out = schema_;
     return Status::OK();
   }
 
   Status ReadNext(std::shared_ptr<RecordBatch>* out) {
-    RETURN_NOT_OK(record_batch_reader_->ReadNext(out));
+    *out = next_batch_;
+    auto status = record_batch_reader_->ReadNext(&next_batch_);
+    if (!status.ok()) {
+      next_batch_ = nullptr;
+    }
     return Status::OK();
   }
 
@@ -81,6 +92,8 @@ class ParquetFileReader::Impl {
   std::shared_ptr<RandomAccessFile> file_;
   std::unique_ptr<::parquet::arrow::FileReader> parquet_reader_;
   std::shared_ptr<RecordBatchReader> record_batch_reader_;
+  std::shared_ptr<RecordBatch> next_batch_;
+  std::shared_ptr<Schema> schema_;
 
   Status GetRecordBatchReader(const std::vector<int>& row_group_indices,
                               const std::vector<int>& column_indices,
