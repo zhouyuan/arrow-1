@@ -64,7 +64,8 @@ public class ParquetReadWriteTest {
   public void testParquetReadWrite() throws Exception {
 
     File testFile = testFolder.newFile("_tmpfile_ParquetWriterReaderTest");
-    String path = testFile.getAbsolutePath();
+    //String path = testFile.getAbsolutePath();
+    String path = "hdfs://sr602:9000/test?user=root&replication=1&use_hdfs3=1";
 
     int numColumns = 10;
     int[] rowGroupIndices = {0};

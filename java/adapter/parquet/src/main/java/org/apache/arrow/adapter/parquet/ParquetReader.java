@@ -100,7 +100,7 @@ public class ParquetReader implements AutoCloseable {
    * @return Schema of parquet file
    * @throws IOException throws io exception in case of native failure
    */
-  Schema getSchema() throws IOException {
+  public Schema getSchema() throws IOException {
     byte[] schemaBytes = jniWrapper.nativeGetSchema(nativeInstanceId);
 
     try (MessageChannelReader schemaReader =

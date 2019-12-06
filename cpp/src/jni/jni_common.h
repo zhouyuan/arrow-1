@@ -42,6 +42,31 @@ static jmethodID arrowbuf_builder_constructor;
 
 static arrow::jni::ConcurrentMap<std::shared_ptr<arrow::Buffer>> buffer_holder_;
 
+#define ARROW_ASSIGN_OR_THROW_IMPL(status_name, lhs, rexpr)                    \
+  auto status_name = (rexpr);                                                  \
+  if (!status_name.status().ok()) {                                            \
+    env->ThrowNew(io_exception_class, status_name.status().message().c_str()); \
+  }                                                                            \
+  lhs = std::move(status_name).ValueOrDie();
+
+#define ARROW_ASSIGN_OR_THROW_NAME(x, y) ARROW_CONCAT(x, y)
+
+// Executes an expression that returns a Result, extracting its value
+// into the variable defined by lhs (or returning on error).
+//
+// Example: Assigning to a new value
+//   ARROW_ASSIGN_OR_THROW(auto value, MaybeGetValue(arg));
+//
+// Example: Assigning to an existing value
+//   ValueType value;
+//   ARROW_ASSIGN_OR_THROW(value, MaybeGetValue(arg));
+//
+// WARNING: ASSIGN_OR_RAISE expands into multiple statements; it cannot be used
+//  in a single statement (e.g. as the body of an if statement without {})!
+#define ARROW_ASSIGN_OR_THROW(lhs, rexpr)                                              \
+  ARROW_ASSIGN_OR_THROW_IMPL(ARROW_ASSIGN_OR_THROW_NAME(_error_or_value, __COUNTER__), \
+                             lhs, rexpr);
+
 jclass CreateGlobalClassReference(JNIEnv* env, const char* class_name) {
   jclass local_class = env->FindClass(class_name);
   jclass global_class = (jclass)env->NewGlobalRef(local_class);
@@ -166,13 +191,13 @@ arrow::Status MakeRecordBatch(const std::shared_ptr<arrow::Schema>& schema, int 
   return arrow::Status::OK();
 }
 
-jobject MakeRecordBatchBuilder(JNIEnv* env, std::shared_ptr<arrow::Schema> schema,
+jobject MakeRecordBatchBuilder(JNIEnv* env,
                                std::shared_ptr<arrow::RecordBatch> record_batch) {
-  jobjectArray field_array =
-      env->NewObjectArray(schema->num_fields(), arrow_field_node_builder_class, nullptr);
+  jobjectArray field_array = env->NewObjectArray(record_batch->num_columns(),
+                                                 arrow_field_node_builder_class, nullptr);
 
   std::vector<std::shared_ptr<arrow::Buffer>> buffers;
-  for (int i = 0; i < schema->num_fields(); ++i) {
+  for (int i = 0; i < record_batch->num_columns(); ++i) {
     auto column = record_batch->column(i);
     auto dataArray = column->data();
     jobject field = env->NewObject(arrow_field_node_builder_class,
