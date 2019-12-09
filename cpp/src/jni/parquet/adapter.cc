@@ -47,6 +47,7 @@ class ParquetFileReader::Impl {
   Status Open(std::shared_ptr<RandomAccessFile>& file, MemoryPool* pool,
               ::parquet::ArrowReaderProperties properties) {
     file_ = file;
+    RETURN_NOT_OK(GetRowGroupOffset(file_));
     RETURN_NOT_OK(::parquet::arrow::FileReader::Make(
         pool, ::parquet::ParquetFileReader::Open(file_), properties, &parquet_reader_));
     return Status::OK();
@@ -63,11 +64,8 @@ class ParquetFileReader::Impl {
 
   Status InitRecordBatchReader(const std::vector<int>& column_indices, int64_t start_pos,
                                int64_t end_pos) {
-    std::vector<int> row_group_indices =
-        GetRowGroupIndices(parquet_reader_->num_row_groups(), start_pos, end_pos);
+    std::vector<int> row_group_indices = GetRowGroupIndices(start_pos, end_pos);
     RETURN_NOT_OK(InitRecordBatchReader(column_indices, row_group_indices));
-    RETURN_NOT_OK(record_batch_reader_->ReadNext(&next_batch_));
-    schema_ = next_batch_->schema();
     return Status::OK();
   }
 
@@ -94,6 +92,7 @@ class ParquetFileReader::Impl {
   std::shared_ptr<RecordBatchReader> record_batch_reader_;
   std::shared_ptr<RecordBatch> next_batch_;
   std::shared_ptr<Schema> schema_;
+  std::vector<uint64_t> row_group_bytes_;
 
   Status GetRecordBatchReader(const std::vector<int>& row_group_indices,
                               const std::vector<int>& column_indices,
@@ -106,18 +105,26 @@ class ParquetFileReader::Impl {
     }
   }
 
-  std::vector<int> GetRowGroupIndices(int num_row_groups, int64_t start_pos,
-                                      int64_t end_pos) {
+  Status GetRowGroupOffset(std::shared_ptr<RandomAccessFile> file) {
     std::unique_ptr<::parquet::ParquetFileReader> reader =
-        ::parquet::ParquetFileReader::Open(file_);
+        ::parquet::ParquetFileReader::Open(file);
+    int num_row_groups = reader->metadata()->num_row_groups();
+    for (int i = 0; i < num_row_groups; i++) {
+      row_group_bytes_.push_back(reader->RowGroup(i)->metadata()->total_byte_size());
+    }
+    return Status::OK();
+  }
+
+  std::vector<int> GetRowGroupIndices(int64_t start_pos, int64_t end_pos) {
     std::vector<int> row_group_indices;
     int64_t pos = 0;
+    int num_row_groups = row_group_bytes_.size();
     for (int i = 0; i < num_row_groups; i++) {
       if (pos >= start_pos && pos < end_pos) {
         row_group_indices.push_back(i);
         break;
       }
-      pos += reader->RowGroup(i)->metadata()->total_byte_size();
+      pos += row_group_bytes_[i];
     }
     if (row_group_indices.empty()) {
       row_group_indices.push_back(num_row_groups - 1);
