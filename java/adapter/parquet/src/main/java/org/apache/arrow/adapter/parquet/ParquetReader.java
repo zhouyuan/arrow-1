@@ -22,6 +22,7 @@ import java.util.List;
 
 import org.apache.arrow.adapter.common.ArrowRecordBatchBuilder;
 import org.apache.arrow.adapter.common.ArrowRecordBatchBuilderImpl;
+import org.apache.arrow.memory.BaseAllocator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorLoader;
@@ -43,7 +44,7 @@ public class ParquetReader implements AutoCloseable {
   /** last readed length of a record batch. */
   private long lastReadLength;
 
-  private BufferAllocator allocator;
+  private BaseAllocator allocator;
   private ParquetReaderJniWrapper jniWrapper;
 
   /**
@@ -61,7 +62,7 @@ public class ParquetReader implements AutoCloseable {
       int[] rowGroupIndices,
       int[] columnIndices,
       long batchSize,
-      BufferAllocator allocator)
+      BaseAllocator allocator)
       throws IOException {
     this.jniWrapper = new ParquetReaderJniWrapper();
     this.allocator = allocator;
@@ -128,7 +129,7 @@ public class ParquetReader implements AutoCloseable {
       return null;
     }
     ArrowRecordBatchBuilderImpl recordBatchBuilderImpl =
-        new ArrowRecordBatchBuilderImpl(recordBatchBuilder);
+        new ArrowRecordBatchBuilderImpl(allocator, recordBatchBuilder);
     ArrowRecordBatch batch = recordBatchBuilderImpl.build();
     this.lastReadLength = batch.getLength();
     return batch;

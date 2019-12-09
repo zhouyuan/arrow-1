@@ -21,6 +21,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.arrow.memory.BaseAllocator;
+import org.apache.arrow.memory.BufferLedger;
 import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 import org.apache.arrow.vector.ipc.message.ArrowRecordBatch;
 
@@ -31,14 +33,16 @@ import io.netty.buffer.ArrowBuf;
  */
 public class ArrowRecordBatchBuilderImpl {
 
-  private int length;
-  private ArrowRecordBatchBuilder recordBatchBuilder;
+  private final BaseAllocator allocator;
+  private final ArrowRecordBatchBuilder recordBatchBuilder;
 
   /**
    * Create ArrowRecordBatchBuilderImpl instance from ArrowRecordBatchBuilder.
+   * @param allocator BufferAllocator for native created buffers
    * @param recordBatchBuilder ArrowRecordBatchBuilder instance.
    */
-  public ArrowRecordBatchBuilderImpl(ArrowRecordBatchBuilder recordBatchBuilder) {
+  public ArrowRecordBatchBuilderImpl(BaseAllocator allocator, ArrowRecordBatchBuilder recordBatchBuilder) {
+    this.allocator = allocator;
     this.recordBatchBuilder = recordBatchBuilder;
   }
 
@@ -58,11 +62,15 @@ public class ArrowRecordBatchBuilderImpl {
 
     List<ArrowBuf> buffers = new ArrayList<ArrowBuf>();
     for (ArrowBufBuilder tmp : recordBatchBuilder.bufferBuilders) {
-      AdaptorReferenceManager referenceManager =
-          new AdaptorReferenceManager(tmp.nativeInstanceId, tmp.size);
-      buffers.add(new ArrowBuf(referenceManager, null, tmp.size, tmp.memoryAddress, false));
+      buffers.add(createArrowBuf(tmp));
     }
     return new ArrowRecordBatch(recordBatchBuilder.length, nodes, buffers);
   }
-  
+
+  private ArrowBuf createArrowBuf(ArrowBufBuilder tmp) {
+    AdaptorAllocationManager referenceManager =
+        new AdaptorAllocationManager(tmp.nativeInstanceId, allocator, tmp.memoryAddress, tmp.size);
+    BufferLedger ledger = referenceManager.associate(allocator, true); // ref count + 1
+    return new ArrowBuf(ledger, null, tmp.size, tmp.memoryAddress, false);
+  }
 } 

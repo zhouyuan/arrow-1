@@ -24,7 +24,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.BaseAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.IntVector;
@@ -48,7 +48,7 @@ public class ParquetReadWriteTest {
 
   @Rule public TemporaryFolder testFolder = new TemporaryFolder();
 
-  private BufferAllocator allocator;
+  private BaseAllocator allocator;
 
   @Before
   public void init() {

@@ -231,7 +231,7 @@ Java_org_apache_arrow_adapter_parquet_ParquetReaderJniWrapper_nativeGetSchema(JN
 }
 
 JNIEXPORT void JNICALL
-Java_org_apache_arrow_adapter_common_AdaptorReferenceManager_nativeRelease(
+Java_org_apache_arrow_adapter_common_AdaptorAllocationManager_nativeRelease(
     JNIEnv* env, jobject this_obj, jlong id) {
   ReleaseBuffer(id);
 }
