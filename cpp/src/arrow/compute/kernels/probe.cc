@@ -26,7 +26,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <iostream>
 
 #include "arrow/array.h"
 #include "arrow/array/dict_internal.h"
@@ -121,10 +120,9 @@ class PorbeKernel : public PorbeKernelImpl {
   Status VisitValue(const Scalar& value) {
     if (memo_table_->Get(value) != -1) {
       indices_builder_.Append(memo_table_->Get(value));
-      std::cout << "xxxx found\n";
       //writer->Set();
     } else {
-      indices_builder_.Append(-1);
+      indices_builder_.AppendNull();
       //writer->Clear();
     }
     //writer->Next();
