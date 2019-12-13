@@ -98,6 +98,9 @@ TYPED_TEST(TestSortToIndicesKernelForIntegral, SortIntegral) {
   std::vector<std::string> input;
   input.push_back("[10, 12, 4, 50, 50, 32, 11]");
   input.push_back("[1, 14, 43, 42, 6, null, 2]");
+  input.push_back("[3, 64, 15, 7, 9, 19, 33]");
+  input.push_back("[23, 17, 41, 18, 20, 35, 30]");
+  input.push_back("[37, null, 22, 13, 8, 59, 21]");
   this->SortArraysToIndices(input);
 }
 
