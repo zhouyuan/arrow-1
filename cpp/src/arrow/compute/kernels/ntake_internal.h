@@ -120,17 +120,17 @@ Status VisitIndices(IndexSequence indices, const Array& values, Visitor&& vis) {
 
 // Helper class for gathering values from an array
 template <typename IndexSequence>
-class Taker {
+class NTaker {
  public:
-  explicit Taker(const std::shared_ptr<DataType>& type) : type_(type) {}
+  explicit NTaker(const std::shared_ptr<DataType>& type) : type_(type) {}
 
-  virtual ~Taker() = default;
+  virtual ~NTaker() = default;
 
   // initialize this taker including constructing any children,
   // must be called once after construction before any other methods are called
   virtual Status Init() { return Status::OK(); }
 
-  // reset this Taker and set FunctionContext for taking an array
+  // reset this NTaker and set FunctionContext for taking an array
   // must be called each time the FunctionContext may have changed
   virtual Status SetContext(FunctionContext* ctx) = 0;
 
@@ -140,8 +140,8 @@ class Taker {
   // assemble an array of all gathered values
   virtual Status Finish(std::shared_ptr<Array>*) = 0;
 
-  // factory; the output Taker will support gathering values of the given type
-  static Status Make(const std::shared_ptr<DataType>& type, std::unique_ptr<Taker>* out);
+  // factory; the output NTaker will support gathering values of the given type
+  static Status Make(const std::shared_ptr<DataType>& type, std::unique_ptr<NTaker>* out);
 
   static_assert(std::is_literal_type<IndexSequence>::value,
                 "Index sequences must be literal type");
@@ -240,12 +240,12 @@ class ArrayIndexSequence {
 // the array supports array.GetView() and the corresponding builder supports
 // builder.UnsafeAppend(array.GetView())
 template <typename IndexSequence, typename T>
-class TakerImpl : public Taker<IndexSequence> {
+class NTakerImpl : public NTaker<IndexSequence> {
  public:
   using ArrayType = typename TypeTraits<T>::ArrayType;
   using BuilderType = typename TypeTraits<T>::BuilderType;
 
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status SetContext(FunctionContext* ctx) override {
     return this->MakeBuilder(ctx->memory_pool(), &builder_);
@@ -273,9 +273,9 @@ class TakerImpl : public Taker<IndexSequence> {
 // Gathering from NullArrays is trivial; skip the builder and just
 // do bounds checking
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, NullType> : public Taker<IndexSequence> {
+class NTakerImpl<IndexSequence, NullType> : public NTaker<IndexSequence> {
  public:
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status SetContext(FunctionContext*) override { return Status::OK(); }
 
@@ -301,16 +301,16 @@ class TakerImpl<IndexSequence, NullType> : public Taker<IndexSequence> {
 };
 
 template <typename IndexSequence, typename TypeClass>
-class ListTakerImpl : public Taker<IndexSequence> {
+class ListNTakerImpl : public NTaker<IndexSequence> {
  public:
   using offset_type = typename TypeClass::offset_type;
   using ArrayType = typename TypeTraits<TypeClass>::ArrayType;
 
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status Init() override {
     const auto& list_type = checked_cast<const TypeClass&>(*this->type_);
-    return Taker<RangeIndexSequence>::Make(list_type.value_type(), &value_taker_);
+    return NTaker<RangeIndexSequence>::Make(list_type.value_type(), &value_taker_);
   }
 
   Status SetContext(FunctionContext* ctx) override {
@@ -363,33 +363,33 @@ class ListTakerImpl : public Taker<IndexSequence> {
 
   std::unique_ptr<TypedBufferBuilder<bool>> null_bitmap_builder_;
   std::unique_ptr<TypedBufferBuilder<offset_type>> offset_builder_;
-  std::unique_ptr<Taker<RangeIndexSequence>> value_taker_;
+  std::unique_ptr<NTaker<RangeIndexSequence>> value_taker_;
 };
 
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, ListType> : public ListTakerImpl<IndexSequence, ListType> {
-  using ListTakerImpl<IndexSequence, ListType>::ListTakerImpl;
+class NTakerImpl<IndexSequence, ListType> : public ListNTakerImpl<IndexSequence, ListType> {
+  using ListNTakerImpl<IndexSequence, ListType>::ListNTakerImpl;
 };
 
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, LargeListType>
-    : public ListTakerImpl<IndexSequence, LargeListType> {
-  using ListTakerImpl<IndexSequence, LargeListType>::ListTakerImpl;
+class NTakerImpl<IndexSequence, LargeListType>
+    : public ListNTakerImpl<IndexSequence, LargeListType> {
+  using ListNTakerImpl<IndexSequence, LargeListType>::ListNTakerImpl;
 };
 
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, MapType> : public ListTakerImpl<IndexSequence, MapType> {
-  using ListTakerImpl<IndexSequence, MapType>::ListTakerImpl;
+class NTakerImpl<IndexSequence, MapType> : public ListNTakerImpl<IndexSequence, MapType> {
+  using ListNTakerImpl<IndexSequence, MapType>::ListNTakerImpl;
 };
 
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, FixedSizeListType> : public Taker<IndexSequence> {
+class NTakerImpl<IndexSequence, FixedSizeListType> : public NTaker<IndexSequence> {
  public:
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status Init() override {
     const auto& list_type = checked_cast<const FixedSizeListType&>(*this->type_);
-    return Taker<RangeIndexSequence>::Make(list_type.value_type(), &value_taker_);
+    return NTaker<RangeIndexSequence>::Make(list_type.value_type(), &value_taker_);
   }
 
   Status SetContext(FunctionContext* ctx) override {
@@ -433,19 +433,19 @@ class TakerImpl<IndexSequence, FixedSizeListType> : public Taker<IndexSequence> 
 
  protected:
   std::unique_ptr<TypedBufferBuilder<bool>> null_bitmap_builder_;
-  std::unique_ptr<Taker<RangeIndexSequence>> value_taker_;
+  std::unique_ptr<NTaker<RangeIndexSequence>> value_taker_;
 };
 
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, StructType> : public Taker<IndexSequence> {
+class NTakerImpl<IndexSequence, StructType> : public NTaker<IndexSequence> {
  public:
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status Init() override {
     children_.resize(this->type_->num_children());
     for (int i = 0; i < this->type_->num_children(); ++i) {
       RETURN_NOT_OK(
-          Taker<IndexSequence>::Make(this->type_->child(i)->type(), &children_[i]));
+          NTaker<IndexSequence>::Make(this->type_->child(i)->type(), &children_[i]));
     }
     return Status::OK();
   }
@@ -495,13 +495,13 @@ class TakerImpl<IndexSequence, StructType> : public Taker<IndexSequence> {
 
  protected:
   std::unique_ptr<TypedBufferBuilder<bool>> null_bitmap_builder_;
-  std::vector<std::unique_ptr<Taker<IndexSequence>>> children_;
+  std::vector<std::unique_ptr<NTaker<IndexSequence>>> children_;
 };
 
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, UnionType> : public Taker<IndexSequence> {
+class NTakerImpl<IndexSequence, UnionType> : public NTaker<IndexSequence> {
  public:
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status Init() override {
     union_type_ = checked_cast<const UnionType*>(this->type_.get());
@@ -515,10 +515,10 @@ class TakerImpl<IndexSequence, UnionType> : public Taker<IndexSequence> {
 
     for (int i = 0; i < this->type_->num_children(); ++i) {
       if (union_type_->mode() == UnionMode::SPARSE) {
-        RETURN_NOT_OK(Taker<IndexSequence>::Make(this->type_->child(i)->type(),
+        RETURN_NOT_OK(NTaker<IndexSequence>::Make(this->type_->child(i)->type(),
                                                  &sparse_children_[i]));
       } else {
-        RETURN_NOT_OK(Taker<ArrayIndexSequence<Int32Type>>::Make(
+        RETURN_NOT_OK(NTaker<ArrayIndexSequence<Int32Type>>::Make(
             this->type_->child(i)->type(), &dense_children_[i]));
       }
     }
@@ -668,20 +668,20 @@ class TakerImpl<IndexSequence, UnionType> : public Taker<IndexSequence> {
   std::unique_ptr<TypedBufferBuilder<bool>> null_bitmap_builder_;
   std::unique_ptr<TypedBufferBuilder<int8_t>> type_id_builder_;
   std::unique_ptr<TypedBufferBuilder<int32_t>> offset_builder_;
-  std::vector<std::unique_ptr<Taker<IndexSequence>>> sparse_children_;
-  std::vector<std::unique_ptr<Taker<ArrayIndexSequence<Int32Type>>>> dense_children_;
+  std::vector<std::unique_ptr<NTaker<IndexSequence>>> sparse_children_;
+  std::vector<std::unique_ptr<NTaker<ArrayIndexSequence<Int32Type>>>> dense_children_;
   std::vector<int32_t> child_length_;
 };
 
 // taking from a DictionaryArray is accomplished by taking from its indices
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, DictionaryType> : public Taker<IndexSequence> {
+class NTakerImpl<IndexSequence, DictionaryType> : public NTaker<IndexSequence> {
  public:
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status Init() override {
     const auto& dict_type = checked_cast<const DictionaryType&>(*this->type_);
-    return Taker<IndexSequence>::Make(dict_type.index_type(), &index_taker_);
+    return NTaker<IndexSequence>::Make(dict_type.index_type(), &index_taker_);
   }
 
   Status SetContext(FunctionContext* ctx) override {
@@ -711,18 +711,18 @@ class TakerImpl<IndexSequence, DictionaryType> : public Taker<IndexSequence> {
 
  protected:
   std::shared_ptr<Array> dictionary_;
-  std::unique_ptr<Taker<IndexSequence>> index_taker_;
+  std::unique_ptr<NTaker<IndexSequence>> index_taker_;
 };
 
 // taking from an ExtensionArray is accomplished by taking from its storage
 template <typename IndexSequence>
-class TakerImpl<IndexSequence, ExtensionType> : public Taker<IndexSequence> {
+class NTakerImpl<IndexSequence, ExtensionType> : public NTaker<IndexSequence> {
  public:
-  using Taker<IndexSequence>::Taker;
+  using NTaker<IndexSequence>::NTaker;
 
   Status Init() override {
     const auto& ext_type = checked_cast<const ExtensionType&>(*this->type_);
-    return Taker<IndexSequence>::Make(ext_type.storage_type(), &storage_taker_);
+    return NTaker<IndexSequence>::Make(ext_type.storage_type(), &storage_taker_);
   }
 
   Status SetContext(FunctionContext* ctx) override {
@@ -743,25 +743,25 @@ class TakerImpl<IndexSequence, ExtensionType> : public Taker<IndexSequence> {
   }
 
  protected:
-  std::unique_ptr<Taker<IndexSequence>> storage_taker_;
+  std::unique_ptr<NTaker<IndexSequence>> storage_taker_;
 };
 
 template <typename IndexSequence>
-struct TakerMakeImpl {
+struct NTakerMakeImpl {
   template <typename T>
   Status Visit(const T&) {
-    out_->reset(new TakerImpl<IndexSequence, T>(type_));
+    out_->reset(new NTakerImpl<IndexSequence, T>(type_));
     return (*out_)->Init();
   }
 
   std::shared_ptr<DataType> type_;
-  std::unique_ptr<Taker<IndexSequence>>* out_;
+  std::unique_ptr<NTaker<IndexSequence>>* out_;
 };
 
 template <typename IndexSequence>
-Status Taker<IndexSequence>::Make(const std::shared_ptr<DataType>& type,
-                                  std::unique_ptr<Taker>* out) {
-  TakerMakeImpl<IndexSequence> visitor{type, out};
+Status NTaker<IndexSequence>::Make(const std::shared_ptr<DataType>& type,
+                                  std::unique_ptr<NTaker>* out) {
+  NTakerMakeImpl<IndexSequence> visitor{type, out};
   return VisitTypeInline(*type, &visitor);
 }
 

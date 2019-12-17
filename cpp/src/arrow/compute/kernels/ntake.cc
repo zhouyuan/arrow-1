@@ -36,7 +36,7 @@ class NTakeKernelImpl : public NTakeKernel {
       : NTakeKernel(value_type) {}
 
   Status Init() {
-    return Taker<ArrayIndexSequence<IndexType>>::Make(this->type_, &taker_);
+    return NTaker<ArrayIndexSequence<IndexType>>::Make(this->type_, &taker_);
   }
 
   Status NTake(FunctionContext* ctx, const Array& values, const Array& indices_array,
@@ -46,10 +46,10 @@ class NTakeKernelImpl : public NTakeKernel {
     return taker_->Finish(out);
   }
 
-  std::unique_ptr<Taker<ArrayIndexSequence<IndexType>>> taker_;
+  std::unique_ptr<NTaker<ArrayIndexSequence<IndexType>>> taker_;
 };
 
-struct UnpackIndices {
+struct NUnpackIndices {
   template <typename IndexType>
   enable_if_integer<IndexType, Status> Visit(const IndexType&) {
     auto out = new NTakeKernelImpl<IndexType>(value_type_);
@@ -68,7 +68,7 @@ struct UnpackIndices {
 Status NTakeKernel::Make(const std::shared_ptr<DataType>& value_type,
                         const std::shared_ptr<DataType>& index_type,
                         std::unique_ptr<NTakeKernel>* out) {
-  UnpackIndices visitor{value_type, out};
+  NUnpackIndices visitor{value_type, out};
   return VisitTypeInline(*index_type, &visitor);
 }
 
