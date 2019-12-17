@@ -280,6 +280,7 @@ if(ARROW_COMPUTE)
               compute/kernels/sum.cc
               compute/kernels/add.cc
               compute/kernels/take.cc
+              compute/kernels/ntake.cc
               compute/kernels/isin.cc
               compute/kernels/probe.cc
               compute/kernels/util_internal.cc
