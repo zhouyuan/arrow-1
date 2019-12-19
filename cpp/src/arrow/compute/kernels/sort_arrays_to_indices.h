@@ -51,7 +51,7 @@ struct ArrayItemIndex {
 ARROW_EXPORT
 Status SortArraysToIndices(FunctionContext* ctx,
                            std::vector<std::shared_ptr<Array>> values,
-                           std::shared_ptr<Array>* offsets);
+                           std::shared_ptr<Array>* offsets, bool nulls_first, bool asc);
 
 }  // namespace compute
 }  // namespace arrow
