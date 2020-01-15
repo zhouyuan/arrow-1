@@ -296,6 +296,12 @@ class TestFileSystemBasedDataSource : public ::testing::Test {
                                                              partitions, format));
   }
 
+  void MakeSingleFileSource(const std::string& path) {
+    auto format = std::make_shared<DummyFileFormat>();
+    ASSERT_OK_AND_ASSIGN(source_,
+        SingleFileDataSource::Make(std::make_shared<FileSource>(path, fs_.get()), fs_, format));
+  }
+
  protected:
   std::shared_ptr<fs::FileSystem> fs_;
   DataSourcePtr source_;

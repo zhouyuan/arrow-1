@@ -173,5 +173,27 @@ class ARROW_DS_EXPORT FileSystemDataSourceDiscovery : public DataSourceDiscovery
   FileSystemDiscoveryOptions options_;
 };
 
+class ARROW_DS_EXPORT SingleFileDataSourceDiscovery : public DataSourceDiscovery {
+ public:
+
+  static Result<DataSourceDiscoveryPtr> Make(FileSourcePtr file,
+                                             fs::FileSystemPtr fs,
+                                             FileFormatPtr format);
+
+  static Result<DataSourceDiscoveryPtr> Make(std::string path,
+                                             fs::FileSystemPtr fs,
+                                             FileFormatPtr format);
+  Result<std::shared_ptr<Schema>> Inspect() override;
+  Result<DataSourcePtr> Finish() override;
+
+ protected:
+  SingleFileDataSourceDiscovery(FileSourcePtr file, fs::FileSystemPtr fs, FileFormatPtr format);
+
+ private:
+  FileSourcePtr file_;
+  FileFormatPtr format_;
+  fs::FileSystemPtr fs_;
+};
+
 }  // namespace dataset
 }  // namespace arrow

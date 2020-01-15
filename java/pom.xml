@@ -674,6 +674,7 @@
     <module>algorithm</module>
     <module>adapter/avro</module>
     <module>flight-grpc</module>
+    <module>dataset</module>
   </modules>
 
   <profiles>

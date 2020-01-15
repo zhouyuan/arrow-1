@@ -138,5 +138,33 @@ Result<DataSourcePtr> FileSystemDataSourceDiscovery::Finish() {
                                     format_);
 }
 
+SingleFileDataSourceDiscovery::SingleFileDataSourceDiscovery(FileSourcePtr file, fs::FileSystemPtr fs, FileFormatPtr format)
+    : file_(std::move(file)), format_(std::move(format)), fs_(std::move(fs)) {}
+
+Result<DataSourceDiscoveryPtr> SingleFileDataSourceDiscovery::Make(FileSourcePtr file,
+                                                                   fs::FileSystemPtr fs,
+                                                                   FileFormatPtr format) {
+  return DataSourceDiscoveryPtr(new SingleFileDataSourceDiscovery(std::move(file), std::move(fs),
+      std::move(format)));
+}
+
+Result<DataSourceDiscoveryPtr> SingleFileDataSourceDiscovery::Make(std::string path,
+                                                                   fs::FileSystemPtr fs,
+                                                                   FileFormatPtr format) {
+
+  std::shared_ptr<FileSource> file_src = std::make_shared<FileSource>(path, fs.get());
+  return DataSourceDiscoveryPtr(new SingleFileDataSourceDiscovery(std::move(file_src), std::move(fs),
+      std::move(format)));
+}
+
+Result<std::shared_ptr<Schema>> SingleFileDataSourceDiscovery::Inspect() {
+  ARROW_ASSIGN_OR_RAISE(std::shared_ptr<arrow::Schema> schema, format_->Inspect(*file_))
+  return schema;
+}
+
+Result<DataSourcePtr> SingleFileDataSourceDiscovery::Finish() {
+  return SingleFileDataSource::Make(file_, fs_, format_);
+}
+
 }  // namespace dataset
 }  // namespace arrow

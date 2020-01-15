@@ -46,13 +46,13 @@ public class BufferLedger implements ValueWithKeyIncluded<BaseAllocator>, Refere
   // correctly
   private final long lCreationTime = System.nanoTime();
   private final BaseAllocator allocator;
-  private final AllocationManager allocationManager;
+  private final AllocationManagerBase allocationManager;
   private final HistoricalLog historicalLog =
       BaseAllocator.DEBUG ? new HistoricalLog(BaseAllocator.DEBUG_LOG_LENGTH,
         "BufferLedger[%d]", 1) : null;
   private volatile long lDestructionTime = 0;
 
-  BufferLedger(final BaseAllocator allocator, final AllocationManager allocationManager) {
+  BufferLedger(final BaseAllocator allocator, final AllocationManagerBase allocationManager) {
     this.allocator = allocator;
     this.allocationManager = allocationManager;
   }

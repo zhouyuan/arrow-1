@@ -34,7 +34,7 @@ namespace arrow {
 namespace dataset {
 
 ScanOptions::ScanOptions()
-    : filter(scalar(true)), evaluator(ExpressionEvaluator::Null()) {}
+    : filter(scalar(true)), evaluator(ExpressionEvaluator::Null()), batch_size(64 * 1024) {}
 
 ScanOptionsPtr ScanOptions::Defaults() { return ScanOptionsPtr(new ScanOptions); }
 
@@ -129,6 +129,11 @@ Status ScannerBuilder::UseThreads(bool use_threads) {
   return Status::OK();
 }
 
+Status ScannerBuilder::BatchSize(int64_t batch_size) {
+  options_->batch_size = batch_size;
+  return Status::OK();
+}
+
 Result<ScannerPtr> ScannerBuilder::Finish() const {
   options_->schema = dataset_->schema();
   if (has_projection_ && !project_columns_.empty()) {
@@ -199,6 +204,9 @@ Result<std::shared_ptr<Table>> Scanner::ToTable() {
   RETURN_NOT_OK(task_group->Finish());
 
   return aggregator.Finish(options_->schema);
+}
+Result<std::shared_ptr<Schema>> Scanner::GetSchema() {
+  return options_->schema;
 }
 
 }  // namespace dataset

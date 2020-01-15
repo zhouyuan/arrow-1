@@ -134,8 +134,10 @@ class ParquetScanTaskIterator {
     auto column_projection = InferColumnProjection(*metadata, options);
 
     std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+    auto* default_reader_props = new parquet::ArrowReaderProperties();
+    default_reader_props->set_batch_size(options->batch_size);
     RETURN_NOT_OK(parquet::arrow::FileReader::Make(context->pool, std::move(reader),
-                                                   &arrow_reader));
+                                                   *default_reader_props, &arrow_reader));
 
     return ScanTaskIterator(ParquetScanTaskIterator(
         std::move(options), std::move(context), std::move(column_projection),

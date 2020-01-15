@@ -62,6 +62,10 @@ using DataSourceDiscoveryPtr = std::shared_ptr<DataSourceDiscovery>;
 class FileFormat;
 using FileFormatPtr = std::shared_ptr<FileFormat>;
 
+class FileSource;
+using FileSourcePtr = std::shared_ptr<FileSource>;
+using FileSourceVector = std::vector<FileSourcePtr>;
+
 class Expression;
 using ExpressionPtr = std::shared_ptr<Expression>;
 using ExpressionVector = std::vector<ExpressionPtr>;

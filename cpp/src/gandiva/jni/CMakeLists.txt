@@ -92,7 +92,7 @@ add_arrow_lib(gandiva_jni
               GANDIVA_JNI_LIBRARIES
               SHARED_PRIVATE_LINK_LIBS
               ${GANDIVA_LINK_LIBS}
-              gandiva_protobuf
+              gandiva_protobuf_static
               STATIC_LINK_LIBS
               ${GANDIVA_LINK_LIBS}
               DEPENDENCIES

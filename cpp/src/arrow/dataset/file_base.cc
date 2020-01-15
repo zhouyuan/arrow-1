@@ -18,6 +18,8 @@
 #include "arrow/dataset/file_base.h"
 
 #include <algorithm>
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "arrow/dataset/filter.h"
@@ -118,6 +120,37 @@ bool FileSystemDataSource::PartitionMatches(const fs::FileStats& stats,
   }
 
   return true;
+}
+
+SingleFileDataSource::SingleFileDataSource(FileSourcePtr file,
+                                           fs::FileSystemPtr fs,
+                                           FileFormatPtr format)
+    : file_(std::move(file)),
+      format_(std::move(format)),
+      fs_(std::move(fs)){}
+
+DataFragmentIterator SingleFileDataSource::GetFragmentsImpl(ScanOptionsPtr options) {
+  std::vector<FileSourcePtr> files({file_});
+  auto file_srcs_it = MakeVectorIterator(std::move(files));
+  auto file_src_to_fragment = [options, this](const FileSourcePtr& source, std::shared_ptr<DataFragment>* out) {
+    ARROW_ASSIGN_OR_RAISE(*out, format_->MakeFragment(*source, options));
+    return Status::OK();
+  };
+  return MakeMaybeMapIterator(file_src_to_fragment, std::move(file_srcs_it));
+}
+
+Result<DataSourcePtr> SingleFileDataSource::Make(std::string path,
+                                              fs::FileSystemPtr fs,
+                                              FileFormatPtr format) {
+  std::shared_ptr<FileSource> file_src = std::make_shared<FileSource>(path, fs.get());
+  return DataSourcePtr(
+      new SingleFileDataSource(std::move(file_src), fs, std::move(format)));
+}
+
+Result<DataSourcePtr> SingleFileDataSource::Make(FileSourcePtr file,
+                                                 fs::FileSystemPtr fs,
+                                                 FileFormatPtr format) {
+  return DataSourcePtr(new SingleFileDataSource(std::move(file), std::move(fs), std::move(format)));
 }
 
 }  // namespace dataset
