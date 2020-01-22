@@ -62,27 +62,17 @@ class ARROW_EXPORT SortArraysToIndicesKernel {
   ///            values of this type
   /// \param[out] out created kernel
   static Status Make(const std::shared_ptr<DataType>& value_type,
-                     std::unique_ptr<SortArraysToIndicesKernel>* out);
+                     std::unique_ptr<SortArraysToIndicesKernel>* out, bool nulls_first,
+                     bool asc);
 };
 
-template <typename ArrayType>
-bool CompareValues(std::vector<std::shared_ptr<ArrayType>> arrays, ArrayItemIndex lhs,
-                   ArrayItemIndex rhs) {
-  return arrays[lhs.array_id]->Value(lhs.id) < arrays[rhs.array_id]->Value(rhs.id);
-}
-
-template <typename ArrayType>
-bool CompareViews(std::vector<std::shared_ptr<ArrayType>> arrays, ArrayItemIndex lhs,
-                  ArrayItemIndex rhs) {
-  return arrays[lhs.array_id]->GetView(lhs.id) < arrays[rhs.array_id]->GetView(rhs.id);
-}
-
-template <typename ArrowType, typename Comparator>
+template <typename ArrowType>
 class SortArraysToIndicesKernelImpl : public SortArraysToIndicesKernel {
   using ArrayType = typename TypeTraits<ArrowType>::ArrayType;
 
  public:
-  explicit SortArraysToIndicesKernelImpl(Comparator compare) : compare_(compare) {}
+  explicit SortArraysToIndicesKernelImpl(bool nulls_first = true, bool asc = true)
+      : nulls_first_(nulls_first), asc_(asc) {}
 
   Status SortArraysToIndices(FunctionContext* ctx,
                              std::vector<std::shared_ptr<Array>> values,
@@ -101,7 +91,7 @@ class SortArraysToIndicesKernelImpl : public SortArraysToIndicesKernel {
   std::shared_ptr<DataType> out_type() const { return type_; }
 
  private:
-  Comparator compare_;
+  bool nulls_first_, asc_;
   std::vector<std::shared_ptr<ArrayType>> typed_arrays_;
   uint64_t merge_time = 0;
 
@@ -129,18 +119,31 @@ class SortArraysToIndicesKernelImpl : public SortArraysToIndicesKernel {
     auto left_size = left.second - left.first;
     auto right_size = right.second - right.first;
 
+    // printf("left.first is %ld, left.size is %ld, right.first is %ld, right.size is
+    // %ld\n",
+    //       left.first, left_size, right.first, right_size);
     memcpy(tmp_buffer + left.first, arrow_buffer + left.first,
            left_size * sizeof(ArrayItemIndex));
     memcpy(tmp_buffer + right.first, arrow_buffer + right.first,
            right_size * sizeof(ArrayItemIndex));
 
-    std::set_union(tmp_buffer + left.first, tmp_buffer + left.second,
-                   tmp_buffer + right.first, tmp_buffer + right.second,
-                   arrow_buffer + left.first,
-                   [this](ArrayItemIndex left, ArrayItemIndex right) {
-                     return typed_arrays_[left.array_id]->GetView(left.id) <
-                            typed_arrays_[right.array_id]->GetView(right.id);
-                   });
+    if (asc_) {
+      std::set_union(tmp_buffer + left.first, tmp_buffer + left.second,
+                     tmp_buffer + right.first, tmp_buffer + right.second,
+                     arrow_buffer + left.first,
+                     [this](ArrayItemIndex left, ArrayItemIndex right) {
+                       return typed_arrays_[left.array_id]->GetView(left.id) <
+                              typed_arrays_[right.array_id]->GetView(right.id);
+                     });
+    } else {
+      std::set_union(tmp_buffer + left.first, tmp_buffer + left.second,
+                     tmp_buffer + right.first, tmp_buffer + right.second,
+                     arrow_buffer + left.first,
+                     [this](ArrayItemIndex left, ArrayItemIndex right) {
+                       return typed_arrays_[left.array_id]->GetView(left.id) >
+                              typed_arrays_[right.array_id]->GetView(right.id);
+                     });
+    }
 
     return std::make_pair(left.first, right.second);
   }
@@ -151,8 +154,10 @@ class SortArraysToIndicesKernelImpl : public SortArraysToIndicesKernel {
     // initiate buffer for all arrays
     std::shared_ptr<Buffer> indices_buf;
     int64_t items_total = 0;
+    int64_t nulls_total = 0;
     for (auto array : values) {
       items_total += array->length();
+      nulls_total += array->null_count();
     }
     int64_t buf_size = items_total * sizeof(ArrayItemIndex);
     RETURN_NOT_OK(AllocateBuffer(ctx->memory_pool(), sizeof(ArrayItemIndex) * buf_size,
@@ -165,110 +170,132 @@ class SortArraysToIndicesKernelImpl : public SortArraysToIndicesKernel {
     std::vector<std::pair<uint64_t, uint64_t>> arrays_valid_range;
 
     int64_t array_id = 0;
-    int64_t null_count_total = 0;
     int64_t indices_i = 0;
-    uint64_t array_sort = 0;
+    int64_t indices_null = 0;
+
+    // we should support nulls first and nulls last here
+    // we should also support desc and asc here
 
     for (auto array : values) {
       auto typed_array = std::dynamic_pointer_cast<ArrayType>(array);
       typed_arrays_.push_back(typed_array);
-      auto array_begin = indices_i;
-      for (int64_t i = 0; i < array->length(); i++) {
-        if (!array->IsNull(i)) {
-          (indices_begin + indices_i)->array_id = array_id;
-          (indices_begin + indices_i)->id = i;
-          indices_i++;
-        } else {
-          (indices_end - null_count_total - 1)->array_id = array_id;
-          (indices_end - null_count_total - 1)->id = i;
-          null_count_total++;
+      int64_t array_begin = 0;
+      int64_t array_end = 0;
+      if (nulls_first_) {
+        array_begin = nulls_total + indices_i;
+        for (int64_t i = 0; i < array->length(); i++) {
+          if (!array->IsNull(i)) {
+            (indices_begin + nulls_total + indices_i)->array_id = array_id;
+            (indices_begin + nulls_total + indices_i)->id = i;
+            indices_i++;
+          } else {
+            (indices_begin + indices_null)->array_id = array_id;
+            (indices_begin + indices_null)->id = i;
+            indices_null++;
+          }
         }
+        array_end = nulls_total + indices_i;
+        arrays_valid_range.push_back(
+            std::make_pair(array_begin - nulls_total, array_end - nulls_total));
+      } else {
+        array_begin = indices_i;
+        for (int64_t i = 0; i < array->length(); i++) {
+          if (!array->IsNull(i)) {
+            (indices_begin + indices_i)->array_id = array_id;
+            (indices_begin + indices_i)->id = i;
+            indices_i++;
+          } else {
+            (indices_end - nulls_total + indices_null)->array_id = array_id;
+            (indices_end - nulls_total + indices_null)->id = i;
+            indices_null++;
+          }
+        }
+        array_end = indices_i;
+        arrays_valid_range.push_back(std::make_pair(array_begin, array_end));
       }
       // first round sort
-      auto array_end = indices_i;
-      std::stable_sort(indices_begin + array_begin, indices_begin + array_end,
-                       [typed_array, this](ArrayItemIndex left, ArrayItemIndex right) {
-                         return typed_array->GetView(left.id) <
-                                typed_array->GetView(right.id);
-                       });
-      arrays_valid_range.push_back(std::make_pair(array_begin, array_end));
+      if (asc_) {
+        std::stable_sort(indices_begin + array_begin, indices_begin + array_end,
+                         [typed_array, this](ArrayItemIndex left, ArrayItemIndex right) {
+                           return typed_array->GetView(left.id) <
+                                  typed_array->GetView(right.id);
+                         });
+      } else {
+        std::stable_sort(indices_begin + array_begin, indices_begin + array_end,
+                         [typed_array, this](ArrayItemIndex left, ArrayItemIndex right) {
+                           return typed_array->GetView(left.id) >
+                                  typed_array->GetView(right.id);
+                         });
+      }
       array_id++;
     }
 
     // merge sort
     ArrayItemIndex* tmp_buffer_begin = new ArrayItemIndex[indices_i]();
-    merge(indices_begin, tmp_buffer_begin, arrays_valid_range.begin(),
-          arrays_valid_range.end());
+    if (nulls_first_) {
+      merge(indices_begin + nulls_total, tmp_buffer_begin, arrays_valid_range.begin(),
+            arrays_valid_range.end());
+    } else {
+      merge(indices_begin, tmp_buffer_begin, arrays_valid_range.begin(),
+            arrays_valid_range.end());
+    }
     delete[] tmp_buffer_begin;
 
-    *offsets = std::make_shared<FixedSizeBinaryArray>(
-        std::make_shared<FixedSizeBinaryType>(sizeof(ArrayItemIndex) / sizeof(int32_t)),
-        items_total, indices_buf);
+    auto out_type =
+        std::make_shared<FixedSizeBinaryType>(sizeof(ArrayItemIndex) / sizeof(int32_t));
+    *offsets = std::make_shared<FixedSizeBinaryArray>(out_type, items_total, indices_buf);
     return Status::OK();
   }
 };
 
-template <typename ArrowType, typename Comparator>
-SortArraysToIndicesKernelImpl<ArrowType, Comparator>* MakeSortArraysToIndicesKernelImpl(
-    Comparator comparator) {
-  return new SortArraysToIndicesKernelImpl<ArrowType, Comparator>(comparator);
+template <typename ArrowType>
+SortArraysToIndicesKernelImpl<ArrowType>* MakeSortArraysToIndicesKernelImpl(
+    bool nulls_first = true, bool asc = true) {
+  return new SortArraysToIndicesKernelImpl<ArrowType>(nulls_first, asc);
 }
 
+#define PROCESS_SUPPORTED_TYPES(PROCESS) \
+  PROCESS(arrow::UInt8Type)              \
+  PROCESS(arrow::Int8Type)               \
+  PROCESS(arrow::UInt16Type)             \
+  PROCESS(arrow::Int16Type)              \
+  PROCESS(arrow::UInt32Type)             \
+  PROCESS(arrow::Int32Type)              \
+  PROCESS(arrow::UInt64Type)             \
+  PROCESS(arrow::Int64Type)              \
+  PROCESS(arrow::FloatType)              \
+  PROCESS(arrow::DoubleType)             \
+  PROCESS(arrow::BinaryType)             \
+  PROCESS(arrow::StringType)
 Status SortArraysToIndicesKernel::Make(const std::shared_ptr<DataType>& value_type,
-                                       std::unique_ptr<SortArraysToIndicesKernel>* out) {
+                                       std::unique_ptr<SortArraysToIndicesKernel>* out,
+                                       bool nulls_first, bool asc) {
   SortArraysToIndicesKernel* kernel;
   switch (value_type->id()) {
-    case Type::UINT8:
-      kernel = MakeSortArraysToIndicesKernelImpl<UInt8Type>(CompareValues<UInt8Array>);
-      break;
-    case Type::INT8:
-      kernel = MakeSortArraysToIndicesKernelImpl<Int8Type>(CompareValues<Int8Array>);
-      break;
-    case Type::UINT16:
-      kernel = MakeSortArraysToIndicesKernelImpl<UInt16Type>(CompareValues<UInt16Array>);
-      break;
-    case Type::INT16:
-      kernel = MakeSortArraysToIndicesKernelImpl<Int16Type>(CompareValues<Int16Array>);
-      break;
-    case Type::UINT32:
-      kernel = MakeSortArraysToIndicesKernelImpl<UInt32Type>(CompareValues<UInt32Array>);
-      break;
-    case Type::INT32:
-      kernel = MakeSortArraysToIndicesKernelImpl<Int32Type>(CompareValues<Int32Array>);
-      break;
-    case Type::UINT64:
-      kernel = MakeSortArraysToIndicesKernelImpl<UInt64Type>(CompareValues<UInt64Array>);
-      break;
-    case Type::INT64:
-      kernel = MakeSortArraysToIndicesKernelImpl<Int64Type>(CompareValues<Int64Array>);
-      break;
-    case Type::FLOAT:
-      kernel = MakeSortArraysToIndicesKernelImpl<FloatType>(CompareValues<FloatArray>);
-      break;
-    case Type::DOUBLE:
-      kernel = MakeSortArraysToIndicesKernelImpl<DoubleType>(CompareValues<DoubleArray>);
-      break;
-    case Type::BINARY:
-      kernel = MakeSortArraysToIndicesKernelImpl<BinaryType>(CompareViews<BinaryArray>);
-      break;
-    case Type::STRING:
-      kernel = MakeSortArraysToIndicesKernelImpl<StringType>(CompareViews<StringArray>);
-      break;
+#define PROCESS(InType)                                                   \
+  case InType::type_id: {                                                 \
+    kernel = MakeSortArraysToIndicesKernelImpl<InType>(nulls_first, asc); \
+  } break;
+    PROCESS_SUPPORTED_TYPES(PROCESS)
+#undef PROCESS
     default:
       return Status::NotImplemented("Sorting of ", *value_type, " arrays");
   }
   out->reset(kernel);
   return Status::OK();
 }
+#undef PROCESS_SUPPORTED_TYPES
 
 Status SortArraysToIndices(FunctionContext* ctx,
                            std::vector<std::shared_ptr<Array>> values,
-                           std::shared_ptr<Array>* offsets) {
+                           std::shared_ptr<Array>* offsets, bool nulls_first = true,
+                           bool asc = true) {
   if (values.size() == 0) {
     return Status::Invalid("Input ArrayList is empty");
   }
   std::unique_ptr<SortArraysToIndicesKernel> kernel;
-  RETURN_NOT_OK(SortArraysToIndicesKernel::Make(values[0]->type(), &kernel));
+  RETURN_NOT_OK(
+      SortArraysToIndicesKernel::Make(values[0]->type(), &kernel, nulls_first, asc));
   return kernel->Call(ctx, values, offsets);
 }
 

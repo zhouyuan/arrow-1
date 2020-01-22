@@ -38,18 +38,21 @@ class TestSortToIndicesKernel : public ComputeFixture, public TestBase {
   void AssertSortArraysToIndices(std::vector<std::shared_ptr<Array>> values,
                                  const std::shared_ptr<Array> expected) {
     std::shared_ptr<Array> actual;
-    ASSERT_OK(arrow::compute::SortArraysToIndices(&this->ctx_, values, &actual));
+    ASSERT_OK(
+        arrow::compute::SortArraysToIndices(&this->ctx_, values, &actual, true, true));
     ASSERT_OK(actual->ValidateFull());
     AssertArraysEqual(*expected, *actual);
   }
 
-  void SortArraysToIndices(std::vector<std::shared_ptr<Array>> values) {
+  void SortArraysToIndices(std::vector<std::shared_ptr<Array>> values, bool nulls_first,
+                           bool asc) {
     std::shared_ptr<Array> actual;
-    std::cout << "=============  Input is ===============" << std::endl;
+    /*std::cout << "=============  Input is ===============" << std::endl;
     for (auto array : values) {
       PrettyPrint(*array.get(), 2, &std::cout);
-    }
-    ASSERT_OK(arrow::compute::SortArraysToIndices(&this->ctx_, values, &actual));
+    }*/
+    ASSERT_OK(arrow::compute::SortArraysToIndices(&this->ctx_, values, &actual,
+                                                  nulls_first, asc));
     std::cout << std::endl << "=============  Output is ===============" << std::endl;
     // print res
     ArrayItemIndex* actual_values =
@@ -79,13 +82,14 @@ class TestSortToIndicesKernel : public ComputeFixture, public TestBase {
     AssertSortArraysToIndices(input, ArrayFromJSON(uint64(), expected));
   }
 
-  virtual void SortArraysToIndices(std::vector<std::string> values) {
+  virtual void SortArraysToIndices(std::vector<std::string> values, bool nulls_first,
+                                   bool asc) {
     auto type = TypeTraits<ArrowType>::type_singleton();
     std::vector<std::shared_ptr<Array>> input;
     for (auto value : values) {
       input.push_back(ArrayFromJSON(type, value));
     }
-    SortArraysToIndices(input);
+    SortArraysToIndices(input, nulls_first, asc);
   }
 };
 
@@ -94,14 +98,44 @@ template <typename ArrowType>
 class TestSortToIndicesKernelForIntegral : public TestSortToIndicesKernel<ArrowType> {};
 TYPED_TEST_CASE(TestSortToIndicesKernelForIntegral, IntegralArrowTypes);
 
-TYPED_TEST(TestSortToIndicesKernelForIntegral, SortIntegral) {
+TYPED_TEST(TestSortToIndicesKernelForIntegral, SortIntegralNullsFirstASC) {
   std::vector<std::string> input;
   input.push_back("[10, 12, 4, 50, 50, 32, 11]");
   input.push_back("[1, 14, 43, 42, 6, null, 2]");
   input.push_back("[3, 64, 15, 7, 9, 19, 33]");
   input.push_back("[23, 17, 41, 18, 20, 35, 30]");
   input.push_back("[37, null, 22, 13, 8, 59, 21]");
-  this->SortArraysToIndices(input);
+  this->SortArraysToIndices(input, true, true);
+}
+
+TYPED_TEST(TestSortToIndicesKernelForIntegral, SortIntegralNullsLastASC) {
+  std::vector<std::string> input;
+  input.push_back("[10, 12, 4, 50, 50, 32, 11]");
+  input.push_back("[1, 14, 43, 42, 6, null, 2]");
+  input.push_back("[3, 64, 15, 7, 9, 19, 33]");
+  input.push_back("[23, 17, 41, 18, 20, 35, 30]");
+  input.push_back("[37, null, 22, 13, 8, 59, 21]");
+  this->SortArraysToIndices(input, false, true);
+}
+
+TYPED_TEST(TestSortToIndicesKernelForIntegral, SortIntegralNullsFirstDESC) {
+  std::vector<std::string> input;
+  input.push_back("[10, 12, 4, 50, 50, 32, 11]");
+  input.push_back("[1, 14, 43, 42, 6, null, 2]");
+  input.push_back("[3, 64, 15, 7, 9, 19, 33]");
+  input.push_back("[23, 17, 41, 18, 20, 35, 30]");
+  input.push_back("[37, null, 22, 13, 8, 59, 21]");
+  this->SortArraysToIndices(input, true, false);
+}
+
+TYPED_TEST(TestSortToIndicesKernelForIntegral, SortIntegralNullsLastDESC) {
+  std::vector<std::string> input;
+  input.push_back("[10, 12, 4, 50, 50, 32, 11]");
+  input.push_back("[1, 14, 43, 42, 6, null, 2]");
+  input.push_back("[3, 64, 15, 7, 9, 19, 33]");
+  input.push_back("[23, 17, 41, 18, 20, 35, 30]");
+  input.push_back("[37, null, 22, 13, 8, 59, 21]");
+  this->SortArraysToIndices(input, false, false);
 }
 
 /*template <typename ArrowType>
