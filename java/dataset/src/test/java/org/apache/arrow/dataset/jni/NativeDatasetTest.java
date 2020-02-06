@@ -102,7 +102,17 @@ public class NativeDatasetTest {
 
   @Test
   public void testHdfsWithHdfsProtocol() {
-    // todo
+    // If using libhdfs rather than libhdfs3:
+    // Set JAVA_HOME and HADOOP_HOME first. See hdfs_internal.cc:128
+    // And libhdfs requires having hadoop java libraries set within CLASSPATH. See 1. https://hadoop.apache.org/docs/r2.7.7/hadoop-project-dist/hadoop-hdfs/LibHdfs.html, 2. https://arrow.apache.org/docs/python/filesystems.html#hadoop-file-system-hdfs
+
+    // If using libhdfs3, make sure ARROW_LIBHDFS3_DIR is set.
+    // Install libhdfs3: https://medium.com/@arush.xtremelife/connecting-hadoop-hdfs-with-python-267234bb68a2
+    String path = "hdfs://localhost:9000/userdata1.parquet?use_hdfs3=1";
+    DataSourceDiscovery discovery = new SingleFileDataSourceDiscovery(
+        new RootAllocator(Long.MAX_VALUE), FileFormat.PARQUET, FileSystem.HDFS,
+        path);
+    testDiscoveryEndToEnd(discovery);
   }
 
   @Test
