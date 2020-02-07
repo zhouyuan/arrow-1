@@ -27,12 +27,14 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import org.apache.arrow.dataset.Dataset;
+import org.apache.arrow.dataset.DatasetTypes;
 import org.apache.arrow.dataset.datasource.DataSource;
 import org.apache.arrow.dataset.datasource.DataSourceDiscovery;
 import org.apache.arrow.dataset.file.FileFormat;
 import org.apache.arrow.dataset.file.FileSystem;
 import org.apache.arrow.dataset.file.SingleFileDataSourceDiscovery;
 import org.apache.arrow.dataset.filter.Filter;
+import org.apache.arrow.dataset.filter.FilterImpl;
 import org.apache.arrow.dataset.fragment.DataFragment;
 import org.apache.arrow.dataset.scanner.ScanOptions;
 import org.apache.arrow.dataset.scanner.ScanTask;
@@ -131,16 +133,79 @@ public class NativeDatasetTest {
     Assert.assertEquals(1, scanTasks.size());
 
     ScanTask scanTask = scanTasks.get(0);
-    List<? extends VectorSchemaRoot> data = collect(scanTask.scan());
-    Assert.assertNotNull(data);
-    Assert.assertEquals(10, data.size());
-    VectorSchemaRoot vsr = data.get(0);
-    Assert.assertEquals(100, vsr.getRowCount());
+    ScanTask.Itr itr = scanTask.scan();
+    int vsrCount = 0;
+    VectorSchemaRoot vsr = null;
+    while (itr.hasNext()) { // FIXME VectorSchemaRoot is not actually something ITERABLE. Using a reader convention instead.
+      vsrCount++;
+      vsr = itr.next();
+      Assert.assertEquals(100, vsr.getRowCount());
 
-    // check if projector is applied
-    Assert.assertEquals("Schema<id: Int(32, true), title: Utf8>",
-        vsr.getSchema().toString());
-    vsr.close();
+      // check if projector is applied
+      Assert.assertEquals("Schema<id: Int(32, true), title: Utf8>",
+          vsr.getSchema().toString());
+    }
+    Assert.assertEquals(10, vsrCount);
+
+    if (vsr != null) {
+      vsr.close();
+    }
+    allocator.close();
+  }
+
+  @Test
+  public void testScannerWithFilter() {
+    String path = sampleParquet();
+    RootAllocator allocator = new RootAllocator(Long.MAX_VALUE);
+    NativeDataSourceDiscovery discovery = new SingleFileDataSourceDiscovery(
+        allocator, FileFormat.PARQUET, FileSystem.LOCAL,
+        path);
+    NativeDataSource dataSource = discovery.finish();
+    Schema schema = discovery.inspect();
+    Dataset<NativeDataSource> dataset = new Dataset<>(Collections.singletonList(dataSource), schema);
+    // condition id = 500
+    DatasetTypes.Condition condition = DatasetTypes.Condition.newBuilder()
+        .setRoot(DatasetTypes.TreeNode.newBuilder()
+            .setCpNode(DatasetTypes.ComparisonNode.newBuilder()
+                .setOpName("equal") // todo make op names enumerable
+                .setLeftArg(
+                    DatasetTypes.TreeNode.newBuilder().setFieldNode(
+                        DatasetTypes.FieldNode.newBuilder().setName("id").build()).build())
+                .setRightArg(
+                    DatasetTypes.TreeNode.newBuilder().setIntNode(
+                        DatasetTypes.IntNode.newBuilder().setValue(500).build()).build())
+                .build())
+            .build())
+        .build();
+    Filter filter = new FilterImpl(condition);
+    NativeScanner scanner = new NativeScanner(
+        dataset, new ScanOptions(new String[]{"id", "title"}, filter, 100), allocator);
+    List<? extends ScanTask> scanTasks = collect(scanner.scan());
+    Assert.assertEquals(1, scanTasks.size());
+
+    ScanTask scanTask = scanTasks.get(0);
+    ScanTask.Itr itr = scanTask.scan();
+    int vsrCount = 0;
+    VectorSchemaRoot vsr = null;
+    while (itr.hasNext()) { // FIXME VectorSchemaRoot is not actually something ITERABLE. Using a reader convention instead.
+      vsrCount++;
+      vsr = itr.next();
+      // only the line with id = 1 selected
+      if (vsrCount == 5) {
+        Assert.assertEquals(1, vsr.getRowCount());
+      } else {
+        Assert.assertEquals(0, vsr.getRowCount());
+      }
+
+      // check if projector is applied
+      Assert.assertEquals("Schema<id: Int(32, true), title: Utf8>",
+          vsr.getSchema().toString());
+    }
+    Assert.assertEquals(10, vsrCount);
+
+    if (vsr != null) {
+      vsr.close();
+    }
     allocator.close();
   }
 

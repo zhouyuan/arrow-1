@@ -15,28 +15,24 @@
  * limitations under the License.
  */
 
-package org.apache.arrow.dataset.scanner;
+package org.apache.arrow.dataset.filter;
 
-import java.util.Iterator;
-
-import org.apache.arrow.vector.VectorSchemaRoot;
+import org.apache.arrow.dataset.DatasetTypes;
 
 /**
- * Read record batches from a range of a single data fragment. A
- * ScanTask is meant to be a unit of work to be dispatched. The implementation
- * must be thread and concurrent safe.
+ * Provided implementation of {@link Filter}.
+ *
+ * @see org.apache.arrow.dataset.DatasetTypes
  */
-public interface ScanTask {
+public class FilterImpl implements Filter {
+  private final DatasetTypes.Condition condition;
 
-  /**
-   * Creates and returns a {@link Itr} instance.
-   */
-  Itr scan();
+  public FilterImpl(DatasetTypes.Condition condition) {
+    this.condition = condition;
+  }
 
-  /**
-   * The iterator implementation for {@link VectorSchemaRoot}s.
-   */
-  interface Itr extends Iterator<VectorSchemaRoot>, AutoCloseable { // FIXME VectorSchemaRoot is not actually something ITERABLE. Using a reader convention instead.
-
+  @Override
+  public byte[] toByteArray() {
+    return condition.toByteArray();
   }
 }

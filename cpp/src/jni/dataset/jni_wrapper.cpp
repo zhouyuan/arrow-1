@@ -22,6 +22,12 @@
 #include <arrow/util/iterator.h>
 #include <arrow/filesystem/hdfs.h>
 #include <arrow/io/api.h>
+#include <google/protobuf/io/coded_stream.h>
+#include <google/protobuf/message.h>
+#include "arrow/compute/kernel.h"
+#include "arrow/compute/kernels/cast.h"
+#include "arrow/compute/kernels/compare.h"
+#include "jni/dataset/Types.pb.h"
 #include "jni/concurrent_map.h"
 
 #include "org_apache_arrow_dataset_file_JniWrapper.h"
@@ -232,6 +238,104 @@ arrow::Status FromSchemaByteArray(JNIEnv* env, jbyteArray schemaBytes,
   return status;
 }
 
+bool ParseProtobuf(uint8_t* buf, int bufLen, google::protobuf::Message* msg) {
+    google::protobuf::io::CodedInputStream cis(buf, bufLen);
+    cis.SetRecursionLimit(1000);
+    return msg->ParseFromCodedStream(&cis);
+}
+
+void releaseFilterInput(jbyteArray condition_arr, jbyte* condition_bytes, JNIEnv* env) {
+  env->ReleaseByteArrayElements(condition_arr, condition_bytes, JNI_ABORT);
+}
+
+// fixme in development. Not all node types considered.
+arrow::dataset::ExpressionPtr translateNode(types::TreeNode node, JNIEnv* env) {
+  if (node.has_fieldnode()) {
+    const types::FieldNode& f_node = node.fieldnode();
+    const std::string& name = f_node.name();
+    return std::make_shared<arrow::dataset::FieldExpression>(name);
+  }
+  if (node.has_intnode()) {
+    const types::IntNode& int_node = node.intnode();
+    int32_t val = int_node.value();
+    return std::make_shared<arrow::dataset::ScalarExpression>(std::make_shared<arrow::NumericScalar<arrow::Int32Type>>(val));
+  }
+  if (node.has_longnode()) {
+    const types::LongNode& long_node = node.longnode();
+    int64_t val = long_node.value();
+    return std::make_shared<arrow::dataset::ScalarExpression>(std::make_shared<arrow::NumericScalar<arrow::Int64Type>>(val));
+  }
+  if (node.has_floatnode()) {
+    const types::FloatNode& float_node = node.floatnode();
+    float_t val = float_node.value();
+    return std::make_shared<arrow::dataset::ScalarExpression>(std::make_shared<arrow::NumericScalar<arrow::FloatType>>(val));
+  }
+  if (node.has_doublenode()) {
+    const types::DoubleNode& double_node = node.doublenode();
+    double_t val = double_node.value();
+    return std::make_shared<arrow::dataset::ScalarExpression>(std::make_shared<arrow::NumericScalar<arrow::DoubleType>>(val));
+  }
+  if (node.has_booleannode()) {
+    const types::BooleanNode& boolean_node = node.booleannode();
+    bool val = boolean_node.value();
+    return std::make_shared<arrow::dataset::ScalarExpression>(std::make_shared<arrow::NumericScalar<arrow::BooleanType>>(val));
+  }
+  if (node.has_andnode()) {
+    const types::AndNode& and_node = node.andnode();
+    const types::TreeNode& left_arg = and_node.leftarg();
+    const types::TreeNode& right_arg = and_node.rightarg();
+    return std::make_shared<arrow::dataset::AndExpression>(translateNode(left_arg, env), translateNode(right_arg, env));
+  }
+  if (node.has_ornode()) {
+    const types::OrNode& or_node = node.ornode();
+    const types::TreeNode& left_arg = or_node.leftarg();
+    const types::TreeNode& right_arg = or_node.rightarg();
+    return std::make_shared<arrow::dataset::OrExpression>(translateNode(left_arg, env), translateNode(right_arg, env));
+  }
+  if (node.has_cpnode()) {
+    const types::ComparisonNode& cp_node = node.cpnode();
+    const std::string& op_name = cp_node.opname();
+    arrow::compute::CompareOperator op;
+    if (op_name == "equal") {
+      op = arrow::compute::CompareOperator::EQUAL;
+    } else if (op_name == "greaterThan") {
+      op = arrow::compute::CompareOperator::GREATER;
+    } else if (op_name == "greaterThanOrEqual") {
+      op = arrow::compute::CompareOperator::GREATER_EQUAL;
+    } else if (op_name == "lessThan") {
+      op = arrow::compute::CompareOperator::LESS;
+    } else if (op_name == "lessThanOrEqual") {
+      op = arrow::compute::CompareOperator::LESS_EQUAL;
+    } else {
+      std::string error_message = "Unknown operation name in comparison node";
+      env->ThrowNew(illegal_argument_exception_class, error_message.c_str());
+    }
+    const types::TreeNode& left_arg = cp_node.leftarg();
+    const types::TreeNode& right_arg = cp_node.rightarg();
+    return std::make_shared<arrow::dataset::ComparisonExpression>(op,
+        translateNode(left_arg, env), translateNode(right_arg, env));
+  }
+  if (node.has_notnode()) {
+    const types::NotNode& not_node = node.notnode();
+    const ::types::TreeNode& child = not_node.args();
+    arrow::dataset::ExpressionPtr translatedChild = translateNode(child, env);
+    return std::make_shared<arrow::dataset::NotExpression>(translatedChild);
+  }
+  if (node.has_isvalidnode()) {
+    const types::IsValidNode& is_valid_node = node.isvalidnode();
+    const ::types::TreeNode& child = is_valid_node.args();
+    arrow::dataset::ExpressionPtr translatedChild = translateNode(child, env);
+    return std::make_shared<arrow::dataset::IsValidExpression>(translatedChild);
+  }
+  std::string error_message = "Unknown node type";
+  env->ThrowNew(illegal_argument_exception_class, error_message.c_str());
+  return nullptr;
+}
+
+arrow::dataset::ExpressionPtr translateFilter(types::Condition condition, JNIEnv* env) {
+  const types::TreeNode& tree_node = condition.root();
+  return translateNode(tree_node, env);
+}
 /*
  * Class:     org_apache_arrow_dataset_jni_JniWrapper
  * Method:    closeDataSourceDiscovery
@@ -401,9 +505,17 @@ JNIEXPORT jobject JNICALL Java_org_apache_arrow_dataset_jni_JniWrapper_nextRecor
 
   for (size_t j = 0; j < buffers.size(); ++j) {
     auto buffer = buffers[j];
+    uint8_t* data = nullptr;
+    int64_t size = 0;
+    int64_t capacity = 0;
+    if (buffer != nullptr) {
+      data = (uint8_t*) buffer->data();
+      size = buffer->size();
+      capacity = buffer->capacity();
+    }
     jobject buffer_handle = env->NewObject(record_batch_handle_buffer_class, record_batch_handle_buffer_constructor,
-                                           buffer_holder_.Insert(buffer), buffer->data(),
-                                           buffer->size(), buffer->capacity());
+                                           buffer_holder_.Insert(buffer), data,
+                                           size, capacity);
     env->SetObjectArrayElement(buffer_array, j, buffer_handle);
   }
 
@@ -465,10 +577,26 @@ JNIEXPORT jlong JNICALL Java_org_apache_arrow_dataset_jni_JniWrapper_createScann
   std::vector<std::string> column_vector = ToStringVector(env, columns);
   scanner_builder->Project(column_vector).ok(); // fixme ok()
   scanner_builder->BatchSize(batch_size).ok(); // fixme ok()
-  // todo initialize filters
+
+  // initialize filters
+  jsize exprs_len = env->GetArrayLength(filter);
+  jbyte* exprs_bytes = env->GetByteArrayElements(filter, 0);
+  types::Condition condition;
+  if (!ParseProtobuf(reinterpret_cast<uint8_t*>(exprs_bytes), exprs_len, &condition)) {
+    releaseFilterInput(filter, exprs_bytes, env);
+    std::string error_message = "bad protobuf message";
+    env->ThrowNew(illegal_argument_exception_class, error_message.c_str());
+  }
+  if (condition.has_root()) {
+    scanner_builder->Filter(translateFilter(condition, env)).ok(); // fixme ok()
+  }
   auto scanner = scanner_builder->Finish().ValueOrDie();
-  return scanner_holder_.Insert(scanner);
+  jlong id = scanner_holder_.Insert(scanner);
+  releaseFilterInput(filter, exprs_bytes, env);
+  return id;
 }
+
+
 
 /*
  * Class:     org_apache_arrow_dataset_jni_JniWrapper
