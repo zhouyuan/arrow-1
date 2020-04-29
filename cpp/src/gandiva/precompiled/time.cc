@@ -458,7 +458,7 @@ FORCE_INLINE
 gdv_date32 castDATE_int32(gdv_int32 in) { return in; }
 
 FORCE_INLINE
-gdv_date64 castDATE_date32(gdv_date32 days) { return days * MILLIS_IN_DAY; }
+gdv_date64 castDATE_date32(gdv_date32 days) { return (gdv_int64)days * MILLIS_IN_DAY; }
 
 static int days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
