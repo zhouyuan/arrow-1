@@ -35,12 +35,12 @@ set(ARROW_BUILD_STATIC OFF)
 
 set(ARROW_DATASET_JNI_LIBS arrow_dataset_static ${ARROW_PROTOBUF_LIBPROTOBUF})
 set(PROTO_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
-set(PROTO_OUTPUT_FILES "${PROTO_OUTPUT_DIR}/Types.pb.cc")
-set(PROTO_OUTPUT_FILES ${PROTO_OUTPUT_FILES} "${PROTO_OUTPUT_DIR}/Types.pb.h")
+set(PROTO_OUTPUT_FILES "${PROTO_OUTPUT_DIR}/DTypes.pb.cc")
+set(PROTO_OUTPUT_FILES ${PROTO_OUTPUT_FILES} "${PROTO_OUTPUT_DIR}/DTypes.pb.h")
 
 set_source_files_properties(${PROTO_OUTPUT_FILES} PROPERTIES GENERATED TRUE)
 
-get_filename_component(ABS_ARROW_DATASET_PROTO ${CMAKE_SOURCE_DIR}/src/jni/dataset/proto/Types.proto
+get_filename_component(ABS_ARROW_DATASET_PROTO ${CMAKE_SOURCE_DIR}/src/jni/dataset/proto/DTypes.proto
         ABSOLUTE)
 
 add_custom_command(OUTPUT ${PROTO_OUTPUT_FILES}
@@ -49,17 +49,17 @@ add_custom_command(OUTPUT ${PROTO_OUTPUT_FILES}
         ${CMAKE_SOURCE_DIR}/src/jni/dataset/proto
         --cpp_out
         ${PROTO_OUTPUT_DIR}
-        ${CMAKE_SOURCE_DIR}/src/jni/dataset/proto/Types.proto
+        ${CMAKE_SOURCE_DIR}/src/jni/dataset/proto/DTypes.proto
         DEPENDS ${ABS_ARROW_DATASET_PROTO} protobuf::libprotobuf
-        COMMENT "Running PROTO compiler on Types.proto"
+        COMMENT "Running PROTO compiler on DTypes.proto"
         VERBATIM)
 
 add_custom_target(arrow_dataset_jni_proto ALL DEPENDS ${PROTO_OUTPUT_FILES})
 
 set(PROTO_SRCS
-        "${PROTO_OUTPUT_DIR}/Types.pb.cc")
+        "${PROTO_OUTPUT_DIR}/DTypes.pb.cc")
 
-set(PROTO_HDRS "${PROTO_OUTPUT_DIR}/Types.pb.h")
+set(PROTO_HDRS "${PROTO_OUTPUT_DIR}/DTypes.pb.h")
 
 
 set(ARROW_DATASET_JNI_SOURCES jni_wrapper.cpp ${PROTO_SRCS})
