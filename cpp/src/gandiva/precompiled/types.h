@@ -152,6 +152,11 @@ gdv_float64 log10_int64(gdv_int64);
 gdv_float64 log10_float32(gdv_float32);
 gdv_float64 log10_float64(gdv_float64);
 
+gdv_uint32 abs_int32(gdv_int32);
+gdv_uint64 abs_int64(gdv_int64);
+gdv_float32 abs_float32(gdv_float32);
+gdv_float64 abs_float64(gdv_float64);
+
 gdv_float64 power_float64_float64(gdv_float64, gdv_float64);
 
 gdv_float64 log_int32_int32(gdv_int64 context, gdv_int32 base, gdv_int32 value);
