@@ -233,7 +233,9 @@ struct TypeTraits<Decimal128Type> {
   using ArrayType = Decimal128Array;
   using BuilderType = Decimal128Builder;
   using ScalarType = Decimal128Scalar;
+  using CType = int64_t;
   constexpr static bool is_parameter_free = false;
+  static std::shared_ptr<DataType> type_singleton() { return decimal(12, 2); }
 };
 
 template <>

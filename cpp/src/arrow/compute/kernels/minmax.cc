@@ -78,6 +78,29 @@ struct MinMaxState<ArrowType, enable_if_floating_point<ArrowType>> {
 };
 
 template <typename ArrowType>
+struct MinMaxState<ArrowType, enable_if_decimal<ArrowType>> {
+  using ThisType = MinMaxState<ArrowType>;
+  using c_type = typename ArrowType::c_type;
+
+  ThisType& operator+=(const ThisType& rhs) {
+    this->has_nulls |= rhs.has_nulls;
+    this->min = std::fmin(this->min, rhs.min);
+    this->max = std::fmax(this->max, rhs.max);
+    return *this;
+  }
+
+  void MergeOne(c_type value) {
+    this->min = std::fmin(this->min, value);
+    this->max = std::fmax(this->max, value);
+  }
+
+  c_type min = std::numeric_limits<c_type>::infinity();
+  c_type max = -std::numeric_limits<c_type>::infinity();
+  bool has_nulls = false;
+};
+
+
+template <typename ArrowType>
 class MinMaxAggregateFunction final
     : public AggregateFunctionStaticState<MinMaxState<ArrowType>> {
  public:
@@ -159,6 +182,7 @@ std::shared_ptr<AggregateFunction> MakeMinMaxAggregateFunction(
     MINMAX_AGG_FN_CASE(Int64Type);
     MINMAX_AGG_FN_CASE(FloatType);
     MINMAX_AGG_FN_CASE(DoubleType);
+    MINMAX_AGG_FN_CASE(Decimal128Type);
     default:
       return nullptr;
   }

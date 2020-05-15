@@ -54,6 +54,12 @@ struct FindAccumulatorType<I, enable_if_floating_point<I>> {
   using Type = DoubleType;
 };
 
+template <typename I>
+struct FindAccumulatorType<I, enable_if_decimal<I>> {
+  using Type = Decimal128Type;
+};
+
+
 template <typename ArrowType, typename StateType>
 class SumAggregateFunction final : public AggregateFunctionStaticState<StateType> {
   using CType = typename TypeTraits<ArrowType>::CType;
@@ -186,18 +192,18 @@ class SumAggregateFunction final : public AggregateFunctionStaticState<StateType
 
     // Consume the first (potentially partial) byte.
     const uint8_t first_mask = BitUtil::kTrailingBitmask[offset % 8];
-    local += UnrolledSum(bitmap[0] & first_mask, values);
+    local += UnrolledSum(bitmap[0] & first_mask, (CType*)values);
 
     // Consume the (full) middle bytes. The loop iterates in unit of
     // batches of 8 values and 1 byte of bitmap.
     for (int64_t i = 1; i < covering_bytes - 1; i++) {
-      local += UnrolledSum(bitmap[i], &values[i * 8]);
+      local += UnrolledSum(bitmap[i], (CType*)(&values[i * 8]));
     }
 
     // Consume the last (potentially partial) byte.
     const int64_t last_idx = covering_bytes - 1;
     const uint8_t last_mask = BitUtil::kPrecedingWrappingBitmask[(offset + length) % 8];
-    local += UnrolledSum(bitmap[last_idx] & last_mask, &values[last_idx * 8]);
+    local += UnrolledSum(bitmap[last_idx] & last_mask, (CType*)&values[last_idx * 8]);
 
     return local;
   }

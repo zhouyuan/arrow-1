@@ -315,6 +315,10 @@ struct ARROW_EXPORT Decimal128Scalar : public Scalar {
   Decimal128Scalar(Decimal128 value, std::shared_ptr<DataType> type)
       : Scalar(std::move(type), true), value(value) {}
 
+  Decimal128Scalar()
+      : Scalar(std::move(type), true), value(0) {}
+
+
   Decimal128 value;
 };
 

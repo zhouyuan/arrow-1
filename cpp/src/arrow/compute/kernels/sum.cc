@@ -75,6 +75,7 @@ std::shared_ptr<AggregateFunction> MakeSumAggregateFunction(const DataType& type
     SUM_AGG_FN_CASE(Int64Type);
     SUM_AGG_FN_CASE(FloatType);
     SUM_AGG_FN_CASE(DoubleType);
+    SUM_AGG_FN_CASE(Decimal128Type);
     default:
       return nullptr;
   }

@@ -77,6 +77,7 @@ std::shared_ptr<AggregateFunction> MakeMeanAggregateFunction(const DataType& typ
     MEAN_AGG_FN_CASE(Int64Type);
     MEAN_AGG_FN_CASE(FloatType);
     MEAN_AGG_FN_CASE(DoubleType);
+    MEAN_AGG_FN_CASE(Decimal128Type);
     default:
       return nullptr;
   }

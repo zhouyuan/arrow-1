@@ -981,6 +981,7 @@ class ARROW_EXPORT Decimal128Type : public DecimalType {
 
   std::string ToString() const override;
   std::string name() const override { return "decimal"; }
+  using c_type = int64_t;
 
   static constexpr int32_t kMinPrecision = 1;
   static constexpr int32_t kMaxPrecision = 38;
