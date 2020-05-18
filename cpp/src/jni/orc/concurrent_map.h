@@ -22,8 +22,8 @@
 #include <unordered_map>
 #include <utility>
 
-#include "jni.h"
 #include "arrow/util/macros.h"
+#include "jni.h"
 
 namespace arrow {
 namespace jni {
