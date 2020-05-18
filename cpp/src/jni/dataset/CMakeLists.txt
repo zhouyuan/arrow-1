@@ -40,7 +40,8 @@ set(PROTO_OUTPUT_FILES ${PROTO_OUTPUT_FILES} "${PROTO_OUTPUT_DIR}/DTypes.pb.h")
 
 set_source_files_properties(${PROTO_OUTPUT_FILES} PROPERTIES GENERATED TRUE)
 
-get_filename_component(ABS_ARROW_DATASET_PROTO ${CMAKE_SOURCE_DIR}/src/jni/dataset/proto/DTypes.proto
+get_filename_component(ABS_ARROW_DATASET_PROTO
+        ${CMAKE_SOURCE_DIR}/src/jni/dataset/proto/DTypes.proto
         ABSOLUTE)
 
 add_custom_command(OUTPUT ${PROTO_OUTPUT_FILES}
