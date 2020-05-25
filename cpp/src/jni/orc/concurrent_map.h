@@ -17,13 +17,13 @@
 
 #pragma once
 
+#include <jni.h>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
 
 #include "arrow/util/macros.h"
-#include "jni.h"
 
 namespace arrow {
 namespace jni {

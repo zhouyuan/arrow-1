@@ -44,6 +44,7 @@ import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
 
+@Ignore
 public class NativeDatasetTest {
 
   private String sampleParquet() {
@@ -83,7 +84,7 @@ public class NativeDatasetTest {
     // FIXME as a result Java side buffer pointer gets out of bound.
   }
 
-  @Test
+  @Ignore
   public void testLocalFs() {
     String path = sampleParquet();
     DatasetFactory discovery = new SingleFileDatasetFactory(
@@ -92,7 +93,7 @@ public class NativeDatasetTest {
     testDatasetFactoryEndToEnd(discovery);
   }
 
-  @Test
+  @Ignore
   public void testHdfsWithFileProtocol() {
     String path = "file:" + sampleParquet();
     DatasetFactory discovery = new SingleFileDatasetFactory(
@@ -101,7 +102,7 @@ public class NativeDatasetTest {
     testDatasetFactoryEndToEnd(discovery);
   }
 
-  @Test
+  @Ignore
   public void testHdfsWithHdfsProtocol() {
     // If using libhdfs rather than libhdfs3:
     // Set JAVA_HOME and HADOOP_HOME first. See hdfs_internal.cc:128

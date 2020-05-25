@@ -27,8 +27,8 @@
 #include "arrow/compute/kernel.h"
 #include "arrow/compute/kernels/cast.h"
 #include "arrow/compute/kernels/compare.h"
-#include "concurrent_map.h"
 #include "jni/dataset/DTypes.pb.h"
+#include "jni/dataset/concurrent_map.h"
 
 #include "org_apache_arrow_dataset_file_JniWrapper.h"
 #include "org_apache_arrow_dataset_jni_JniWrapper.h"
@@ -469,7 +469,7 @@ Java_org_apache_arrow_dataset_jni_JniWrapper_getScanTasksFromScanner(JNIEnv* env
   std::vector<std::shared_ptr<arrow::dataset::ScanTask>> vector =
       collect(env, std::move(itr));
   jlongArray ret = env->NewLongArray(vector.size());
-  for (unsigned long i = 0; i < vector.size(); i++) {
+  for (size_t i = 0; i < vector.size(); i++) {
     std::shared_ptr<arrow::dataset::ScanTask> scan_task = vector.at(i);
     jlong id[] = {scan_task_holder_.Insert(scan_task)};
     env->SetLongArrayRegion(ret, i, 1, id);

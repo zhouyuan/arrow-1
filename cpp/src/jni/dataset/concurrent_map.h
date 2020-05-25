@@ -18,13 +18,13 @@
 #ifndef JNI_ID_TO_MODULE_MAP_H
 #define JNI_ID_TO_MODULE_MAP_H
 
+#include <jni.h>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
 
 #include "arrow/util/macros.h"
-#include "jni.h"
 
 namespace arrow {
 namespace jni {

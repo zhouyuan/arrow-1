@@ -686,7 +686,6 @@
     <module>performance</module>
     <module>algorithm</module>
     <module>adapter/avro</module>
-    <module>dataset</module>
   </modules>
 
   <profiles>
@@ -706,6 +705,7 @@
       <id>arrow-jni</id>
       <modules>
         <!-- these have dependency on cpp -->
+        <module>dataset</module>
         <module>adapter/orc</module>
         <module>gandiva</module>
       </modules>
